@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GitHub Trending 分析</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0d14; --bg2:#151520; --card:#1a1a2e; --cardh:#1f1f38;
+  --border:#2a2a45; --txt:#e8e8f0; --txt2:#9898b8; --txt3:#686888;
+  --ac1:#6366f1; --ac2:#a855f7; --ac3:#06b6d4; --gold:#f59e0b;
+  --silver:#94a3b8; --bronze:#d97706; --ok:#10b981; --err:#ef4444;
+  --grad:linear-gradient(135deg,var(--ac1),var(--ac2));
+  --r:12px; --rs:8px;
+}
+html{font-size:15px}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--txt3)}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans SC",sans-serif;
+  background:var(--bg); color:var(--txt); min-height:100vh; line-height:1.6;
+}
+a{color:var(--ac3);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* Header */
+.app-header{
+  background:linear-gradient(180deg,rgba(99,102,241,.12) 0%,transparent 100%);
+  border-bottom:1px solid var(--border); padding:14px 24px;
+  display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:100;backdrop-filter:blur(12px);
+}
+.header-left{display:flex;align-items:center;gap:20px}
+.header-logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.1rem}
+.header-logo .icon{width:34px;height:34px;background:var(--grad);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1rem}
+.header-actions{display:flex;align-items:center;gap:8px}
+
+.btn{
+  padding:7px 15px;border-radius:var(--rs);border:1px solid var(--border);
+  background:var(--card);color:var(--txt);font-size:.78rem;font-weight:500;
+  cursor:pointer;transition:.2s;white-space:nowrap;display:flex;align-items:center;gap:5px;
+}
+.btn:hover{background:var(--cardh);border-color:var(--ac1)}
+.btn.primary{background:var(--grad);border:none;color:#fff}
+.btn.primary:hover{box-shadow:0 2px 12px rgba(99,102,241,.35)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+.container{max-width:1400px;margin:0 auto;padding:20px 24px}
+
+/* Tab Nav */
+.tab-nav{display:flex;gap:4px;background:var(--bg2);border-radius:var(--r);padding:4px;margin-bottom:20px;border:1px solid var(--border)}
+.tab-btn{flex:1;padding:9px 16px;border:none;border-radius:10px;background:transparent;color:var(--txt2);font-size:.85rem;cursor:pointer;transition:.2s}
+.tab-btn:hover{color:var(--txt);background:rgba(255,255,255,.03)}
+.tab-btn.active{background:var(--grad);color:#fff;box-shadow:0 2px 12px rgba(99,102,241,.35)}
+
+/* Layout */
+.main-layout{display:flex;gap:20px}
+.pull-list{flex:1;min-width:0}
+.detail-panel{width:420px;flex-shrink:0;position:sticky;top:80px;align-self:flex-start;max-height:calc(100vh - 100px);overflow-y:auto}
+
+/* Pull Card */
+.pull-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);margin-bottom:12px;overflow:hidden}
+.pull-header{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;transition:.2s}
+.pull-header:hover{background:rgba(99,102,241,.04)}
+.pull-header .pull-info{display:flex;align-items:center;gap:12px}
+.pull-header .pull-id{font-weight:700;color:var(--ac1);font-size:.9rem}
+.pull-header .pull-time{font-size:.82rem;color:var(--txt2)}
+.pull-header .pull-count{font-size:.78rem;color:var(--txt3)}
+.pull-header .expand-icon{transition:.2s;color:var(--txt3)}
+.pull-header .expand-icon.open{transform:rotate(90deg)}
+.pull-body{display:none;border-top:1px solid var(--border)}
+.pull-body.open{display:block}
+
+/* Project Row */
+.project-row{display:flex;align-items:center;padding:10px 18px;border-bottom:1px solid rgba(42,42,69,.4);gap:10px;font-size:.85rem;transition:.2s}
+.project-row:hover{background:rgba(99,102,241,.03)}
+.project-row.selected{background:rgba(99,102,241,.12);border-left:3px solid var(--ac1)}
+.project-row .rank{font-weight:700;min-width:28px;text-align:center}
+.rank-1{color:var(--gold)}.rank-2{color:var(--silver)}.rank-3{color:var(--bronze)}
+.project-row .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--ac3);cursor:pointer}
+.project-row .stars{min-width:80px;text-align:right;color:#f1c40f;font-weight:600}
+.project-row .appearance{min-width:85px;text-align:center;font-size:.78rem}
+.project-row .appearance .badge{display:inline-block;padding:2px 8px;border-radius:20px;background:rgba(16,185,129,.12);color:var(--ok);font-weight:600}
+.project-row .appearance .badge.low{background:rgba(104,104,136,.12);color:var(--txt3)}
+.project-row .actions{min-width:80px;width:80px;text-align:right}
+.btn-sm{padding:4px 0;width:36px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--txt2);font-size:.73rem;cursor:pointer;transition:.2s;text-align:center;display:inline-block}
+.btn-sm:hover{background:var(--ac1);border-color:var(--ac1);color:#fff}
+.btn-sm.done{border-color:transparent;cursor:default}
+.btn-sm.loading{opacity:.5;cursor:wait}
+.spinning{animation:spin 2s ease-in-out infinite;border-color:transparent!important}
+
+/* Toggle */
+.toggle{position:relative;display:inline-block;width:44px;height:24px}
+.toggle input{display:none}
+.toggle .slider{position:absolute;inset:0;background:var(--border);border-radius:24px;cursor:pointer;transition:.3s}
+.toggle .slider::before{content:'';position:absolute;left:3px;bottom:3px;width:18px;height:18px;background:#fff;border-radius:50%;transition:.3s}
+.toggle input:checked+.slider{background:var(--ac1)}
+.toggle input:checked+.slider::before{transform:translateX(20px)}
+.setting-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:4px 0}
+.setting-row label{font-size:.9rem;color:var(--txt2)}
+.setting-row input[type=number]{width:80px;padding:8px 12px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.9rem;text-align:center}
+.setting-row input[type=number]:focus{border-color:var(--ac1);outline:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.status-icon{font-size:.9rem}
+
+/* Pull footer */
+.pull-footer{padding:12px 18px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid var(--border)}
+.pull-summary{padding:16px 20px;border-top:1px solid var(--border);background:rgba(99,102,241,.02)}
+
+/* Detail panel */
+.panel-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:20px;margin-bottom:16px}
+.panel-card h3{font-size:.95rem;margin-bottom:12px}
+.panel-card .meta{font-size:.8rem;color:var(--txt3);margin-bottom:8px}
+.panel-card .desc{font-size:.85rem;color:var(--txt2);margin-bottom:12px}
+.analysis-block{margin-bottom:14px}
+.analysis-block h4{font-size:.78rem;color:var(--ac1);margin-bottom:4px;text-transform:uppercase}
+.analysis-block p{font-size:.82rem;color:var(--txt2);line-height:1.7}
+
+/* Markdown */
+.md h1{font-size:1.2rem;margin:16px 0 8px}
+.md h2{font-size:1.05rem;margin:12px 0 6px}
+.md h3{font-size:.95rem;margin:10px 0 4px}
+.md p{margin:8px 0;font-size:.85rem;color:var(--txt2)}
+.md ul{padding-left:20px;margin:8px 0}
+.md li{font-size:.85rem;color:var(--txt2);margin:4px 0}
+.md strong{color:var(--ac1)}
+.md em{color:var(--ac3)}
+.md hr{border:none;border-top:1px solid var(--border);margin:14px 0}
+.md code{background:rgba(99,102,241,.1);padding:2px 6px;border-radius:4px;font-size:.8rem}
+.md pre{background:var(--bg2);padding:12px;border-radius:var(--rs);overflow-x:auto;font-size:.8rem}
+
+/* Modal */
+.modal-overlay{display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);align-items:center;justify-content:center}
+.modal-overlay.active{display:flex}
+.modal-box{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:24px;max-width:750px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:0 8px 48px rgba(0,0,0,.5)}
+.modal-box h3{font-size:1rem;margin-bottom:16px}
+.modal-box .close{float:right;background:none;border:none;color:var(--txt3);font-size:1.2rem;cursor:pointer}
+.modal-box .close:hover{color:var(--txt)}
+.modal-result{font-size:.82rem;color:var(--txt2);white-space:pre-wrap}
+
+/* Highlights table */
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th,td{padding:10px 14px;text-align:left;font-size:.85rem}
+th{color:var(--txt3);font-weight:500;font-size:.75rem;text-transform:uppercase;border-bottom:1px solid var(--border);background:rgba(0,0,0,.15)}
+td{border-bottom:1px solid rgba(42,42,69,.4)}
+tr:hover td{background:rgba(99,102,241,.03)}
+
+.empty{text-align:center;padding:40px;color:var(--txt3)}
+.loading{text-align:center;padding:60px;color:var(--txt3)}
+.loading::after{content:'';display:block;width:32px;height:32px;margin:12px auto;border:3px solid var(--border);border-top-color:var(--ac1);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+@media(max-width:900px){
+  .main-layout{flex-direction:column}
+  .detail-panel{width:100%;position:static;max-height:none}
+}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-left">
+    <div class="header-logo"><div class="icon">📊</div>GitHub Trending</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span id="user-info" style="font-size:.82rem;color:var(--txt2)"><a href="#" onclick="showLogin()" style="font-size:.82rem">登录</a></span>
+  </div>
+</header>
+
+<div class="container">
+
+<nav class="tab-nav">
+  <button class="tab-btn active" data-tab="pulls">📋 Trendings</button>
+  <button class="tab-btn" data-tab="searching">🔍 Searching</button>
+  <button class="tab-btn" data-tab="reports">📄 Reports</button>
+  <button class="tab-btn" data-tab="settings" style="display:none">⚙️ 设置</button>
+</nav>
+
+<div class="main-layout">
+
+<!-- Pull List -->
+<div class="pull-list">
+  <div id="tab-pulls" class="tab-content">
+    <div style="margin-bottom:14px"><button class="btn primary" onclick="if(needLogin())return;triggerRunOnce()">▶ 立即抓取</button></div>
+    <div id="pulls-container"><div class="loading"></div></div>
+  </div>
+  <div id="tab-searching" class="tab-content" style="display:none">
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-body" style="display:flex;align-items:center;flex-wrap:wrap;gap:12px">
+        <span style="display:flex;align-items:center;gap:4px"><span style="font-size:.78rem;color:var(--txt3)">周期（天）</span><input type="number" id="s_period" value="7" min="1" max="365" style="width:60px;padding:8px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.85rem;text-align:center"></span>
+        <span style="display:flex;align-items:center;gap:4px"><span style="font-size:.78rem;color:var(--txt3)">Fork≥</span><input type="number" id="s_forks" value="3" min="0" max="100" style="width:60px;padding:8px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.85rem;text-align:center"></span>
+        <span style="display:flex;align-items:center;gap:4px"><span style="font-size:.78rem;color:var(--txt3)">最大拉取数量</span><input type="number" id="s_per_page" value="20" min="1" max="100" style="width:60px;padding:8px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.85rem;text-align:center"></span>
+        <span style="display:flex;align-items:center;gap:4px"><span style="font-size:.78rem;color:var(--txt3)">排序</span><select id="s_sort" style="padding:8px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.85rem"><option value="stars" selected>stars</option><option value="forks">forks</option><option value="updated">updated</option></select></span>
+        <select id="s_order" style="padding:8px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.85rem"><option value="desc" selected>desc</option><option value="asc">asc</option></select>
+        <button class="btn primary" onclick="doSearch()">🔍 搜索</button>
+      </div>
+    </div>
+    <div id="search-results"></div>
+    <div id="search-history" style="margin-top:18px"><div class="loading"></div></div>
+  </div>
+  <div id="tab-reports" class="tab-content" style="display:none">
+    <div id="reports-container"></div>
+  </div>
+  <div id="tab-settings" class="tab-content" style="display:none">
+    <div class="card" style="max-width:600px">
+      <div class="card-header">⚙️ 设置</div>
+      <div class="card-body" id="settings-form" style="display:flex;flex-direction:column;gap:18px">
+        <div class="loading"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Detail Panel -->
+<div class="detail-panel" id="detail-panel">
+  <div class="panel-card">
+    <div style="text-align:center;color:var(--txt3);padding:20px">
+      <div style="font-size:2rem;margin-bottom:8px">📋</div>
+      点击项目名称查看详情
+    </div>
+  </div>
+</div>
+
+</div></div>
+
+<!-- Modal -->
+<!-- Toast --><div id="toast" style="display:none;position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:300;background:var(--grad);color:#fff;padding:10px 24px;border-radius:var(--rs);font-size:.85rem;box-shadow:0 4px 20px rgba(99,102,241,.4);transition:opacity .3s"></div>
+
+<div class="modal-overlay" id="modal">
+  <div class="modal-box">
+    <button class="close" onclick="closeModal()">✕</button>
+    <h3 id="modal-title"></h3>
+    <div class="modal-result" id="modal-body"></div>
+  </div>
+</div>
+
+<!-- Auth Modal -->
+<div class="modal-overlay" id="auth-modal">
+  <div class="modal-box" style="max-width:400px">
+    <button class="close" onclick="closeAuth()">✕</button>
+    <div style="display:flex;gap:4px;background:var(--bg2);border-radius:var(--rs);padding:4px;margin-bottom:18px">
+      <button id="auth-tab-login" class="tab-btn active" style="flex:1;padding:8px;border:none;border-radius:8px" onclick="switchAuthTab('login')">登录</button>
+      <button id="auth-tab-register" class="tab-btn" style="flex:1;padding:8px;border:none;border-radius:8px" onclick="switchAuthTab('register')">注册</button>
+    </div>
+    <form id="auth-form-login" onsubmit="doLogin(event)" style="display:flex;flex-direction:column;gap:12px">
+      <input name="username" placeholder="用户名" required style="padding:10px 12px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.9rem">
+      <input name="password" type="password" placeholder="密码" required style="padding:10px 12px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.9rem">
+      <button type="submit" class="btn primary" style="width:100%;justify-content:center;padding:10px">登录</button>
+      <div id="login-err" style="display:none;color:var(--err);font-size:.8rem;text-align:center"></div>
+    </form>
+    <form id="auth-form-register" onsubmit="doRegister(event)" style="display:none;flex-direction:column;gap:12px">
+      <input name="username" placeholder="用户名" required style="padding:10px 12px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.9rem">
+      <input name="email" type="email" placeholder="邮箱" required style="padding:10px 12px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.9rem">
+      <input name="password" type="password" placeholder="密码（至少8位）" required minlength="8" style="padding:10px 12px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.9rem">
+      <button type="submit" class="btn primary" style="width:100%;justify-content:center;padding:10px">注册</button>
+      <div id="register-err" style="display:none;color:var(--err);font-size:.8rem;text-align:center"></div>
+    </form>
+    <form id="auth-form-verify" onsubmit="doVerify(event)" style="display:none;flex-direction:column;gap:12px">
+      <p style="font-size:.85rem;color:var(--txt2);text-align:center">验证码已发送到 <strong id="verify-email-text"></strong></p>
+      <input name="code" placeholder="6位验证码" required maxlength="6" style="padding:10px 12px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.9rem;text-align:center;letter-spacing:4px">
+      <button type="submit" class="btn primary" style="width:100%;justify-content:center;padding:10px">验证</button>
+      <a href="#" onclick="resendCode(event)" style="font-size:.78rem;color:var(--txt3);text-align:center">重新发送验证码</a>
+      <div id="verify-err" style="display:none;color:var(--err);font-size:.8rem;text-align:center"></div>
+    </form>
+  </div>
+</div>
+
+<script>
+const API='/api';
+function $(s){return document.querySelector(s)}
+function $$(s){return document.querySelectorAll(s)}
+function fmt(n){return n!=null?Number(n).toLocaleString():'0'}
+function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}
+function aHeaders(){const h={};const t=getToken();if(t)h['Authorization']='Bearer '+t;return h}
+async function aFetch(url,opts={}){opts.headers={...opts.headers,...aHeaders()};if(opts.body&&typeof opts.body==='object'&&!(opts.body instanceof FormData)){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(opts.body)}return fetch(url,opts)}
+
+// ── Tab switching ──────────────────────────────────────
+
+$$('.tab-btn').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.tab)));
+function switchTab(name){
+  $$('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));
+  $$('.tab-content').forEach(c=>c.style.display='none');
+  $(`#tab-${name}`).style.display='';
+  $('#detail-panel').style.display=(name==='pulls'||name==='searching')?'':'none';
+  if(name!=='pulls'&&name!=='searching'){document.querySelectorAll('.project-row.selected').forEach(r=>r.classList.remove('selected'));_selectedRepo=null;}
+  if(name==='pulls')loadPulls();
+  if(name==='searching'){document.getElementById('search-results').innerHTML='';loadSearchHistory();}
+  if(name==='settings')loadSettings();
+  if(name==='reports')loadReports();
+  if(name==='settings')loadSettings();
+}
+
+// ── Pull List ──────────────────────────────────────────
+
+async function loadPulls(){
+  const c=$('#pulls-container');
+  c.innerHTML='<div class="loading"></div>';
+  try{
+    const data=await fetch(API+'/trending-pulls?source=trending').then(r=>r.json());
+    if(!data.pulls.length){c.innerHTML='<div class="empty">暂无 Pull 记录</div>';return}
+    let h='';
+    data.pulls.forEach(p=>{
+      h+=`<div class="pull-card" id="pull-${p.id}">
+        <div class="pull-header" onclick="togglePull(this,${p.id})">
+          <div class="pull-info">
+            <span class="expand-icon" id="expand-${p.id}">▶</span>
+            <span class="pull-time">${new Date(p.pulled_at).toLocaleString()}</span>
+            <span style="font-size:.7rem;color:var(--ac3);background:rgba(6,182,212,.12);padding:1px 6px;border-radius:4px">${p.source||'trending'}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="pull-count">${p.project_count} projects${p.has_summary?' 📝':''}</span>
+            <button class="btn-sm" onclick="event.stopPropagation();if(needLogin())return;exportPull(${p.id})" title="导出" style="font-size:1rem">📥</button>
+            <button class="btn-sm" onclick="event.stopPropagation();if(needLogin())return;deletePull(${p.id})" title="删除" style="font-size:1rem">🗑</button>
+          </div>
+        </div>
+        <div class="pull-body" id="body-${p.id}">
+          <div class="loading" style="padding:20px"></div>
+        </div>
+      </div>`;
+    });
+    c.innerHTML=h;
+  }catch(e){c.innerHTML='<div class="empty">加载失败</div>'}
+}
+
+async function togglePull(el, id){
+  const card=el.closest('.pull-card');
+  const body=card.querySelector('.pull-body');
+  const icon=card.querySelector('.expand-icon');
+  if(!body||!icon)return;
+  if(body.classList.contains('open')){
+    body.classList.remove('open');
+    icon.classList.remove('open');
+    body.innerHTML='<div class="loading" style="padding:20px"></div>';
+    return;
+  }
+  // Load pull detail
+  body.innerHTML='<div class="loading" style="padding:20px"></div>';
+  body.classList.add('open');
+  icon.classList.add('open');
+  try{
+    const data=await fetch(`${API}/trending-pulls/${id}`).then(r=>r.json());
+    if(data.error){body.innerHTML=`<div class="empty">${esc(data.error)}</div>`;return}
+
+    const isSearch=data.source==='search';
+    let h='';
+    if(isSearch){
+      h+=`<div class="project-row" style="color:var(--txt3);font-size:.75rem;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);background:rgba(0,0,0,.15)">
+        <span class="rank">排名</span>
+        <span class="name">项目</span>
+        <span style="flex:1;font-size:.75rem">描述</span>
+        <span style="min-width:80px;text-align:center">语言</span>
+        <span class="stars">Stars</span>
+        <span class="stars">Forks</span>
+      </div>`;
+    }else{
+      h+=`<div class="project-row" style="color:var(--txt3);font-size:.75rem;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);background:rgba(0,0,0,.15)">
+        <span class="rank">排名</span>
+        <span class="name">项目</span>
+        <span class="stars">总 ★</span>
+        <span class="stars" style="color:var(--ac3)">本周 ★</span>
+        <span class="appearance">近一周</span>
+        <span class="actions">分析</span>
+      </div>`;
+    }
+    data.items.forEach(it=>{
+      const rc=`rank-${it.rank<=3?it.rank:'other'}`;
+      const abadge=it.appearance_days>=2?`<span class="badge">${it.appearance_days}天</span>`:`<span class="badge low">${it.appearance_days}天</span>`;
+      const abtn=it.analysis_status==='done'
+        ?`<button class="btn-sm done analyze-btn" data-repo="${it.repo_id}" title="已分析 ${it.analyzed_at?new Date(it.analyzed_at).toLocaleString():''}">✅</button>`
+        :`<button class="btn-sm analyze-btn" data-repo="${it.repo_id}" onclick="event.stopPropagation();if(needLogin())return;analyzeProject(${it.repo_id})" title="分析">🧠</button>`;
+
+      if(isSearch){
+        h+=`<div class="project-row" id="proj-${it.repo_id}-${id}" onclick="showDetail(${it.repo_id})" style="cursor:pointer">
+          <span class="rank">#${it.rank}</span>
+          <span class="name"><a href="${esc(it.url)}" target="_blank" title="${esc(it.description)}" onclick="event.stopPropagation()">${esc(it.full_name)}</a></span>
+          <span style="flex:1;font-size:.8rem;color:var(--txt3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.description)}</span>
+          <span style="min-width:80px;text-align:center;font-size:.8rem;color:var(--txt2)">${esc(it.language||'?')}</span>
+          <span class="stars">★ ${fmt(it.stars)}</span>
+          <span class="stars">${fmt(it.forks)}</span>
+        </div>`;
+      }else{
+        h+=`<div class="project-row" id="proj-${it.repo_id}-${id}" onclick="showDetail(${it.repo_id})" style="cursor:pointer">
+          <span class="rank ${rc}">#${it.rank}</span>
+          <span class="name"><a href="${esc(it.url)}" target="_blank" title="${esc(it.description)}" onclick="event.stopPropagation()">${esc(it.full_name)}</a></span>
+          <span class="stars">★ ${fmt(it.stars)}</span>
+          <span class="stars" style="color:var(--ac3)">+${fmt(it.stars_week)}</span>
+          <span class="appearance">${abadge}</span>
+          <span class="actions">${abtn}</span>
+        </div>`;
+      }
+    });
+
+    // Footer buttons
+    h+=`<div class="pull-footer">
+      <button class="btn" onclick="event.stopPropagation();if(needLogin())return;analyzePull(${id})">🧠 批量分析</button>
+      <button class="btn primary" onclick="event.stopPropagation();if(needLogin())return;summarizePull(${id})">📝 生成总结</button>
+    </div>`;
+
+    // Summary display
+    if(data.summary){
+      h+=`<div class="pull-summary md">${md(data.summary)}</div>`;
+    }
+
+    body.innerHTML=h;
+  }catch(e){body.innerHTML='<div class="empty">加载失败: ${esc(e.message)}</div>'}
+}
+
+async function deletePull(id){
+  if(!confirm('确认删除这条 Trending 记录？'))return;
+  try{
+    const res=await aFetch(`${API}/trending-pulls/${id}`,{method:'DELETE'}).then(r=>r.json());
+    if(res.status==='ok'){
+      $(`#pull-${id}`).remove();
+    }
+  }catch(e){}
+}
+
+async function viewReport(filename){
+  openModal(filename);
+  try{
+    const res=await fetch(`${API}/reports/${encodeURIComponent(filename)}`).then(r=>r.json());
+    if(res.status==='ok'){
+      $('#modal-body').innerHTML=`<div class="md">${md(res.content)}</div>`;
+    }else{
+      $('#modal-body').innerHTML=`<p style="color:var(--err)">${esc(res.message)}</p>`;
+    }
+  }catch(e){$('#modal-body').innerHTML='<p style="color:var(--err)">加载失败</p>'}
+}
+
+async function deleteReport(filename){
+  if(!confirm(`确认删除 ${filename}？`))return;
+  try{
+    await aFetch(`${API}/reports/${encodeURIComponent(filename)}`,{method:'DELETE'});
+    loadReports();
+  }catch(e){}
+}
+
+async function exportPull(id){
+  try{
+    const res=await aFetch(`${API}/trending-pulls/${id}/export`,{method:'POST'}).then(r=>r.json());
+    if(res.status==='ok'){showToast('✅ 导出成功: '+res.filename);loadReports()}
+  }catch(e){showToast('❌ 导出失败')}
+}
+
+// ── Analysis triggers ──────────────────────────────────
+
+function needLogin(){if(!isLoggedIn()){showToast('🔒 请先登录');return true}return false}
+function guardAnalyze(fn){return function(){if(needLogin())return;return fn.apply(this,arguments)}}
+
+async function analyzeProject(repoId,pullId){
+  // 找到所有可见的该 repo 的分析按钮，全部置为 loading
+  const btns=document.querySelectorAll(`.analyze-btn[data-repo="${repoId}"]`);
+  btns.forEach(b=>{b.textContent='⏳';b.classList.add('spinning')});
+
+  try{
+    const res=await aFetch(`${API}/projects/${repoId}/analyze`,{method:'POST'}).then(r=>r.json());
+    if(res.status==='ok'){
+      btns.forEach(b=>{b.classList.remove('spinning');b.classList.add('done');b.textContent='✅'});
+    }else{
+      btns.forEach(b=>{b.classList.remove('spinning');b.textContent='❌'});
+    }
+  }catch(e){
+    btns.forEach(b=>{b.classList.remove('loading');b.textContent='❌'});
+  }
+}
+
+async function analyzeFromDetail(repoId){
+  const btn=document.querySelector(`#detail-analyze-${repoId} .analyze-btn`);
+  if(btn){btn.textContent='⏳ 分析中...';btn.classList.add('spinning')}
+  await analyzeProject(repoId);
+  if(btn){btn.classList.remove('spinning');btn.classList.add('done');btn.textContent='✅ 分析完成'}
+  showDetail(repoId);
+}
+
+async function analyzePull(pullId){
+  const body=$(`#body-${pullId}`);
+  if(!body||!body.classList.contains('open')){togglePull(pullId);return}
+  // Mark all unanalyzed as loading
+  body.querySelectorAll('.btn-sm:not(.done)').forEach(b=>{b.textContent='⏳';b.classList.add('spinning')});
+  try{
+    const res=await aFetch(`${API}/trending-pulls/${pullId}/analyze`,{method:'POST'}).then(r=>r.json());
+    if(res.status==='ok'){
+      // Refresh pull
+      togglePull(pullId);
+      setTimeout(()=>togglePull(pullId),100);
+    }
+  }catch(e){}
+}
+
+async function summarizePull(pullId){
+  const body=$(`#body-${pullId}`);
+  if(!body||!body.classList.contains('open')){togglePull(pullId);return}
+  // Show loading in footer
+  const footer=body.querySelector('.pull-footer');
+  if(footer)footer.innerHTML='<span style="color:var(--txt3)">⏳ 正在生成总结...</span>';
+  try{
+    const res=await aFetch(`${API}/trending-pulls/${pullId}/summarize`,{method:'POST'}).then(r=>r.json());
+    if(res.status==='ok'){
+      togglePull(pullId);
+      setTimeout(()=>togglePull(pullId),100);
+    }
+  }catch(e){}
+}
+
+// ── Detail Panel ───────────────────────────────────────
+
+let _selectedRepo=null;
+
+async function showDetail(repoId){
+  // 高亮选中行
+  document.querySelectorAll('.project-row.selected').forEach(r=>r.classList.remove('selected'));
+  document.querySelectorAll(`[id^="proj-${repoId}-"]`).forEach(r=>r.classList.add('selected'));
+  _selectedRepo=repoId;
+
+  const panel=$('#detail-panel');
+  panel.innerHTML='<div class="loading"></div>';
+  try{
+    const data=await fetch(`${API}/project/${repoId}`).then(r=>r.json());
+    if(data.error){panel.innerHTML=`<div class="panel-card"><div class="empty">${esc(data.error)}</div></div>`;return}
+
+    let h=`<div class="panel-card">
+      <h3><a href="${esc(data.url)}" target="_blank">${esc(data.full_name)}</a></h3>
+      <div class="meta">语言: ${esc(data.language||'?')} | 总 ★ ${fmt(data.stars)} | 本周 +${fmt(data.stars_week)} | 🔀 ${fmt(data.forks)} | 近一周上榜: ${data.tracking?data.tracking.appearance_days+'天':'0天'}</div>
+      <div class="desc">${esc(data.description)}</div>`;
+
+    if(data.analysis&&data.analysis.has_analysis){
+      h+=`<div class="meta" style="margin-bottom:12px">📊 分析时间: ${data.analysis.analyzed_at?new Date(data.analysis.analyzed_at).toLocaleString():''}</div>`;
+      h+=`<div class="analysis-block"><h4>💡 功能概述</h4><p>${md(data.analysis.functionality||'无')}</p></div>`;
+      h+=`<div class="analysis-block"><h4>⚙️ 技术栈</h4><p>${md(data.analysis.tech_stack||'无')}</p></div>`;
+      h+=`<div class="analysis-block"><h4>🎯 痛点解决</h4><p>${md(data.analysis.pain_points||'无')}</p></div>`;
+      h+=`<div class="analysis-block"><h4>🏆 竞品分析</h4><p>${md(data.analysis.competitors||'无')}</p></div>`;
+    }else{
+      h+=`<div style="text-align:center;padding:12px 0" id="detail-analyze-${repoId}">
+        <button class="btn analyze-btn" data-repo="${repoId}" onclick="if(needLogin())return;analyzeFromDetail(${repoId})">🧠 开始分析</button>
+      </div>`;
+    }
+    h+='</div>';
+    panel.innerHTML=h;
+  }catch(e){panel.innerHTML='<div class="panel-card"><div class="empty">加载失败</div></div>'}
+}
+
+// ── Searching ──────────────────────────────────────────
+
+async function loadSearchHistory(){
+  const el=$('#search-history');
+  el.innerHTML='<div class="loading"></div>';
+  try{
+    const data=await fetch(API+'/trending-pulls?source=search').then(r=>r.json());
+    if(!data.pulls.length){el.innerHTML='<div class="empty" style="padding:20px">暂无搜索记录</div>';return}
+    let h='<div class="section-title" style="margin-bottom:10px">📋 搜索历史</div>';
+    data.pulls.forEach(p=>{
+      h+=`<div class="pull-card">
+        <div class="pull-header" onclick="togglePull(this,${p.id})">
+          <div class="pull-info">
+            <span class="expand-icon" id="expand-${p.id}">▶</span>
+            <span class="pull-time">${new Date(p.pulled_at).toLocaleString()}</span>
+            <span style="font-size:.7rem;color:var(--ac3);background:rgba(6,182,212,.12);padding:1px 6px;border-radius:4px">search</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="pull-count">${p.project_count} projects</span>
+            <button class="btn-sm" onclick="event.stopPropagation();if(needLogin())return;exportPull(${p.id})" title="导出" style="font-size:1rem">📥</button>
+            <button class="btn-sm" onclick="event.stopPropagation();if(needLogin())return;deletePull(${p.id})" title="删除" style="font-size:1rem">🗑</button>
+          </div>
+        </div>
+        <div class="pull-body" id="body-${p.id}"><div class="loading" style="padding:20px"></div></div>
+      </div>`;
+    });
+    el.innerHTML=h;
+  }catch(e){el.innerHTML='<div class="empty">加载失败</div>'}
+}
+
+async function doSearch(){
+  const el=$('#search-results');
+  el.innerHTML='<div class="loading"></div>';
+  const body={
+    search_period_days: parseInt($('#s_period').value)||7,
+    search_min_forks: parseInt($('#s_forks').value)||3,
+    per_page: parseInt($('#s_per_page').value)||20,
+    search_sort: $('#s_sort').value,
+    search_order: $('#s_order').value,
+  };
+  try{
+    const data=await aFetch(API+'/search',{method:'POST',body}).then(r=>r.json());
+    if(data.status!=='ok'){el.innerHTML=`<div class="empty">${esc(data.message)}</div>`;return}
+    if(!data.repos.length){el.innerHTML='<div class="empty">无结果</div>';return}
+    let h=`<div class="card"><div class="card-header">${data.count} 个结果</div><div class="table-wrap"><table><thead><tr><th>#</th><th>项目</th><th>描述</th><th>语言</th><th>Stars</th><th>Forks</th></tr></thead><tbody>`;
+    data.repos.forEach(r=>{
+      h+=`<tr>
+        <td>${r.rank}</td>
+        <td><a href="${esc(r.url)}" target="_blank" style="font-weight:600;color:var(--ac3)">${esc(r.full_name)}</a></td>
+        <td style="font-size:.8rem;color:var(--txt3);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.description)}</td>
+        <td style="font-size:.8rem">${esc(r.language||'?')}</td>
+        <td>★ ${fmt(r.stars)}</td>
+        <td>${fmt(r.forks)}</td>
+      </tr>`;
+    });
+    h+='</tbody></table></div></div>';
+    el.innerHTML=h;
+    showToast(`✅ 已保存为 Pull #${data.pull_id} (${data.count} 个项目)`);
+    setTimeout(()=>{loadPulls();loadSearchHistory()},500);
+  }catch(e){el.innerHTML='<div class="empty">搜索失败</div>'}
+}
+
+// ── Highlights ─────────────────────────────────────────
+
+async function loadReports(){
+  const c=$('#reports-container');
+  c.innerHTML='<div class="loading"></div>';
+  try{
+    const data=await fetch(API+'/reports').then(r=>r.json());
+    if(!data.reports.length){c.innerHTML='<div class="empty">暂无导出报告</div>';return}
+    let h='<div class="table-wrap"><table><thead><tr><th>文件</th><th>大小</th><th>导出时间</th><th>Pull 时间</th><th>操作</th></tr></thead><tbody>';
+    data.reports.forEach(r=>{
+      const size=r.size>1024?(r.size/1024).toFixed(1)+' KB':r.size+' B';
+      const mtime=r.mtime?new Date(r.mtime).toLocaleString():'-';
+      const ptime=r.pull_time?new Date(r.pull_time).toLocaleString():'-';
+      h+=`<tr style="cursor:pointer" onclick="viewReport('${esc(r.filename)}')">
+        <td><code>${esc(r.filename)}</code></td>
+        <td>${size}</td>
+        <td>${mtime}</td>
+        <td>${ptime}</td>
+        <td><button class="btn-sm" onclick="event.stopPropagation();if(needLogin())return;deleteReport('${esc(r.filename)}')" title="删除">🗑</button></td>
+      </tr>`;
+    });
+    h+='</tbody></table></div>';
+    c.innerHTML=h;
+  }catch(e){c.innerHTML='<div class="empty">加载失败</div>'}
+}
+
+// ── Markdown renderer ──────────────────────────────────
+
+function md(s){
+  if(!s)return'<em>暂无内容</em>';
+  if(typeof marked!=='undefined')return marked.parse(s);
+  // fallback: escape HTML
+  return s.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Modal ──────────────────────────────────────────────
+
+function openModal(t){$('#modal-title').textContent=t;$('#modal-body').innerHTML='<div class="loading"></div>';$('#modal').classList.add('active')}
+function closeModal(){$('#modal').classList.remove('active')}
+$('#modal').addEventListener('click',function(e){if(e.target===this)closeModal()});
+
+let _toastTimer;
+function showToast(msg){
+  const t=$('#toast');
+  if(!t)return;
+  t.textContent=msg;t.style.display='block';t.style.opacity='1';
+  clearTimeout(_toastTimer);
+  _toastTimer=setTimeout(()=>{t.style.opacity='0';setTimeout(()=>{t.style.display='none'},300)},2500);
+}
+
+// ── Trigger buttons ────────────────────────────────────
+
+async function triggerRunOnce(){
+  openModal('抓取中...');
+  $('#modal-body').innerHTML='<div class="loading"></div><p style="text-align:center;color:var(--txt3)">正在抓取 GitHub Weekly Trending...</p>';
+  try{
+    const data=await aFetch(API+'/trigger/run-once?force=true',{method:'POST'}).then(r=>r.json());
+    if(data.status==='ok'){
+      const r=data.result;
+      let h=`<p style="color:var(--ok)">✅ 抓取完成</p><table style="width:100%;font-size:.82rem"><tbody>
+        <tr><td>日期</td><td>${r.date}</td></tr>
+        <tr><td>抓取</td><td>${r.fetched} 个项目</td></tr>
+        <tr><td>重点关注</td><td>${r.highlights} 个</td></tr>
+        <tr><td>错误</td><td>${r.errors.length||'无'}</td></tr>
+        </tbody></table>`;
+      $('#modal-body').innerHTML=h;
+      setTimeout(()=>loadPulls(),500);
+    }else{$('#modal-body').innerHTML=`<p style="color:var(--err)">错误: ${esc(data.message)}</p>`}
+  }catch(e){$('#modal-body').innerHTML=`<p style="color:var(--err)">请求失败</p>`}
+}
+
+
+// ── Settings ──────────────────────────────────────────
+
+function _settingRow(label, body, cls){return `<div class="setting-row${cls?' '+cls:''}"><label>${label}</label>${body}</div>`}
+function _toggle(name, checked){return `<label class="toggle"><input type="checkbox" name="${name}" ${checked?'checked':''} onchange="saveSetting('${name}',this.checked);onAutoPullChange()"><span class="slider"></span></label>`}
+function _num(name, val, min, max){return `<input type="number" name="${name}" min="${min}" max="${max}" value="${val}" onchange="saveSetting('${name}',this.value)">`}
+function _select(name, val, opts, onchg){return `<select name="${name}" onchange="saveSetting('${name}',this.value);${onchg||''}" style="padding:8px 12px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.9rem">${opts.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}</select>`}
+
+function onAutoPullChange(){
+  const ap=document.querySelector('[name=auto_pull]');
+  if(!ap)return;
+  const on=ap.checked;
+  ['auto_analyze','pull_start_time','pull_period_mode','pull_interval_hours'].forEach(n=>{
+    const el=document.querySelector(`[name=${n}]`);if(el)el.disabled=!on;
+  });
+  document.querySelector('.row-schedule').style.opacity=on?'1':'.4';
+  _toggleInterval();
+}
+
+function _toggleInterval(){
+  const mode=document.querySelector('[name=pull_period_mode]');
+  const row=document.querySelector('.row-interval');
+  if(mode&&row)row.style.display=mode.value==='once'?'none':'inline-flex';
+}
+
+async function loadSettings(){
+  const el=$('#settings-form');
+  el.innerHTML='<div class="loading"></div>';
+  try{
+    const s=await fetch(API+'/settings').then(r=>r.json());
+    const ap=s.auto_pull==='true';
+    const dim=ap?'1':'.4';
+    el.innerHTML=`
+      ${_settingRow('每次拉取项目数',_num('per_page',s.per_page||20,1,50))}
+      ${_settingRow('GitHub Token',`<input type="text" name="github_token" value="${esc(s.github_token||'')}" onchange="saveSetting('github_token',this.value)" placeholder="ghp_xxx" style="width:200px;padding:8px 12px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.85rem">`)}
+      <hr style="border:none;border-top:1px solid var(--border)">
+      <div style="font-size:.8rem;color:var(--txt3);margin-bottom:-8px">自动化</div>
+      ${_settingRow('启用定时 Pull',_toggle('auto_pull',ap))}
+      <div class="row-schedule" style="opacity:${dim}">
+        ${_settingRow('开始 Pull 时间',`<input type="time" name="pull_start_time" value="${s.pull_start_time||'09:00'}" onchange="saveSetting('pull_start_time',this.value)" style="padding:8px 12px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.9rem">`)}
+        ${_settingRow('Pull 周期',_select('pull_period_mode',s.pull_period_mode||'interval',['once','interval'],'_toggleInterval()')+'<span class="row-interval" style="display:inline-flex;align-items:center;gap:4px">'+_num('pull_interval_hours',s.pull_interval_hours||24,1,168)+'<span style="font-size:.78rem;color:var(--txt3)">小时</span></span>')}
+        ${_settingRow('Pull 后自动分析',_toggle('auto_analyze',s.auto_analyze==='true'))}
+      </div>
+    `;
+    setTimeout(()=>{onAutoPullChange();_toggleInterval()},50);
+  }catch(e){el.innerHTML='<div class="empty">加载失败</div>'}
+}
+
+async function saveSetting(key,value){
+  try{
+    const body={};body[key]=value;
+    await aFetch(API+'/settings',{method:'POST',body});
+    showToast('✅ 已保存');
+  }catch(e){showToast('❌ 保存失败')}
+}
+
+// ── Auth ──────────────────────────────────────────────
+
+let _currentUser=null;
+function getToken(){return localStorage.getItem('token')||''}
+function setToken(t){localStorage.setItem('token',t)}
+function clearToken(){localStorage.removeItem('token')}
+function isLoggedIn(){return !!_currentUser}
+function isSuperAdmin(){return _currentUser?.role==='super_admin'}
+
+async function fetchAuth(url, opts={}){
+  const token=getToken();
+  const headers={...opts.headers};
+  if(token)headers['Authorization']='Bearer '+token;
+  if(opts.body&&typeof opts.body==='object'&&!(opts.body instanceof FormData)){
+    headers['Content-Type']='application/json';opts.body=JSON.stringify(opts.body);
+  }
+  return fetch(url,{...opts,headers});
+}
+
+async function refreshUser(){
+  try{
+    const token=getToken();
+    if(!token){_currentUser=null;updateAuthUI();return}
+    const res=await fetchAuth(API+'/auth/me');
+    const d=await res.json();
+    _currentUser=d.user||null;
+  }catch(e){_currentUser=null}
+  updateAuthUI();
+}
+
+function updateAuthUI(){
+  const el=$('#user-info');
+  const user=_currentUser;
+  if(user){
+    const roleBadge=user.role==='super_admin'?'<span style="font-size:.7rem;color:var(--gold);background:rgba(245,158,11,.12);padding:1px 6px;border-radius:4px;margin-left:4px">超管</span>':'';
+    el.innerHTML=`<span style="margin-right:8px">${esc(user.username)}${roleBadge}</span><a href="#" onclick="doLogout()" style="font-size:.78rem;color:var(--txt3)">退出</a>`;
+  }else{
+    el.innerHTML='<a href="#" onclick="showLogin()" style="font-size:.82rem">登录</a>';
+  }
+  // 设置 Tab
+  const setTab=document.querySelector('[data-tab=settings]');
+  if(setTab)setTab.style.display=isSuperAdmin()?'':'none';
+  // 按钮状态刷新
+  document.querySelectorAll('.analyze-btn:not(.done)').forEach(b=>{
+    b.title=isLoggedIn()?'分析':'请先登录';
+    b.style.opacity=isLoggedIn()?'1':'.4';
+  });
+  // 更多按钮在 togglePull 展开时会刷新，这里不需要额外处理
+}
+
+async function doLogin(e){
+  e.preventDefault();
+  const f=e.target;
+  const body={username:f.username.value,password:f.password.value};
+  $('#login-err').style.display='none';
+  try{
+    const res=await fetch(API+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await res.json();
+    if(!res.ok){
+      if(res.status===403&&d.detail&&d.detail.includes('邮箱未验证')){
+        // 从错误详情中提取邮箱
+        const parts=d.detail.split('|');
+        _regEmail=parts[1]||'';
+        $('#verify-email-text').textContent=_regEmail||'您的邮箱';
+        $('#auth-form-login').style.display='none';
+        $('#auth-form-register').style.display='none';
+        $('#auth-form-verify').style.display='flex';
+        const lb=document.getElementById('auth-tab-login');
+        const rb=document.getElementById('auth-tab-register');
+        lb.classList.remove('active');lb.style.background='transparent';lb.style.color='var(--txt2)';
+        rb.classList.remove('active');rb.style.background='transparent';rb.style.color='var(--txt2)';
+        return;
+      }
+      $('#login-err').textContent=d.detail||'登录失败';$('#login-err').style.display='';return
+    }
+    setToken(d.access_token);
+    closeAuth();
+    showToast('✅ 登录成功');
+    await refreshUser();
+    loadPulls();
+  }catch(e){$('#login-err').textContent='网络错误';$('#login-err').style.display=''}
+}
+
+let _regEmail='';
+
+async function doRegister(e){
+  e.preventDefault();
+  const f=e.target;
+  const body={username:f.username.value,email:f.email.value,password:f.password.value};
+  $('#register-err').style.display='none';
+  try{
+    const res=await fetch(API+'/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await res.json();
+    if(!res.ok){$('#register-err').textContent=d.detail||'注册失败';$('#register-err').style.display='';return}
+    if(d.access_token){
+      // 无 SMTP 模式：直接注册成功
+      setToken(d.access_token);closeAuth();showToast('✅ 注册成功');
+      await refreshUser();loadPulls();
+    }else if(d.message&&d.message.includes('验证码')){
+      // SMTP 模式：需要邮箱验证
+      _regEmail=body.email;
+      $('#verify-email-text').textContent=body.email;
+      $('#auth-form-register').style.display='none';
+      $('#auth-form-verify').style.display='flex';
+      const lb=document.getElementById('auth-tab-login');
+      const rb=document.getElementById('auth-tab-register');
+      lb.classList.remove('active');lb.style.background='transparent';lb.style.color='var(--txt2)';
+      rb.classList.remove('active');rb.style.background='transparent';rb.style.color='var(--txt2)';
+    }else{
+      showToast('✅ 注册成功，请登录');
+      switchAuthTab('login');
+    }
+  }catch(e){$('#register-err').textContent='网络错误';$('#register-err').style.display=''}
+}
+
+async function doVerify(e){
+  e.preventDefault();
+  const code=e.target.code.value;
+  $('#verify-err').style.display='none';
+  try{
+    const res=await fetch(API+'/auth/verify-email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:_regEmail,code})});
+    const d=await res.json();
+    if(!res.ok){$('#verify-err').textContent=d.detail||'验证失败';$('#verify-err').style.display='';return}
+    if(d.access_token){
+      setToken(d.access_token);closeAuth();showToast('✅ 验证成功');
+      await refreshUser();loadPulls();
+    }
+  }catch(e){$('#verify-err').textContent='网络错误';$('#verify-err').style.display=''}
+}
+
+async function resendCode(e){
+  e.preventDefault();
+  try{
+    const res=await fetch(API+'/auth/resend-code',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:_regEmail})});
+    const d=await res.json();
+    showToast(d.message||'验证码已重新发送');
+  }catch(e){showToast('重发失败')}
+}
+
+function doLogout(){
+  clearToken();_currentUser=null;updateAuthUI();
+  showToast('已退出登录');
+  document.querySelectorAll('.analyze-btn').forEach(b=>{b.title='请先登录';b.style.opacity='.4'});
+}
+
+function showLogin(){$('#auth-modal').classList.add('active');switchAuthTab('login')}
+function closeAuth(){$('#auth-modal').classList.remove('active')}
+$('#auth-modal').addEventListener('click',function(e){if(e.target===this)closeAuth()});
+
+function switchAuthTab(tab){
+  const loginBtn=document.getElementById('auth-tab-login');
+  const regBtn=document.getElementById('auth-tab-register');
+  loginBtn.classList.toggle('active',tab==='login');
+  regBtn.classList.toggle('active',tab==='register');
+  loginBtn.style.background=tab==='login'?'var(--grad)':'transparent';
+  loginBtn.style.color=tab==='login'?'#fff':'var(--txt2)';
+  regBtn.style.background=tab==='register'?'var(--grad)':'transparent';
+  regBtn.style.color=tab==='register'?'#fff':'var(--txt2)';
+  document.getElementById('auth-form-login').style.display=tab==='login'?'flex':'none';
+  document.getElementById('auth-form-register').style.display=tab==='register'?'flex':'none';
+  document.getElementById('auth-form-verify').style.display='none';
+  _regEmail='';
+}
+
+// ── Startup ────────────────────────────────────────────
+
+refreshUser().then(()=>loadPulls());
+</script>
+</body>
+</html>

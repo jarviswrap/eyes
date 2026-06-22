@@ -1,0 +1,28 @@
+# GitHub Weekly Trending 每日分析系统 配置文件
+
+scheduler:
+  run_time: "09:00"          # 每天执行时间 (HH:MM)
+  timezone: "Asia/Shanghai"
+  summary_day: 6             # 周总结生成日: 0=周一, 6=周日
+
+llm:
+  provider: "deepseek"
+  api_key: "${LLM_API_KEY}"  # 从环境变量读取
+  base_url: "https://api.deepseek.com/v1"
+  model: "deepseek-chat"
+  max_tokens: 4096
+  temperature: 0.3
+  concurrency: 5             # LLM 并发请求数
+  max_retries: 3
+
+github:
+  token: "${GITHUB_TOKEN}"   # 可选，提高 API 限额（不设置也可运行）
+  per_page: 20
+  request_delay: 2           # 请求间隔(秒)
+
+database:
+  path: "data/trending.db"
+
+output:
+  log_level: "INFO"
+  log_file: "logs/app.log"
