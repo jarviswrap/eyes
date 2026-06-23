@@ -117,9 +117,12 @@ def _on_once_done():
 def _git_commit_push(commit_msg: str = ""):
     """自动 git add + commit + push。非阻塞，静默失败。"""
     import subprocess
+    import os as _os
     try:
         repo_root = Path(__file__).parent
         msg = commit_msg or "auto: export reports"
+
+        env = {**_os.environ, "GIT_SSH_COMMAND": "ssh -o StrictHostKeyChecking=no"}
 
         r1 = subprocess.run(
             ["git", "add", "reports/", "README.md"],
@@ -129,13 +132,13 @@ def _git_commit_push(commit_msg: str = ""):
 
         r2 = subprocess.run(
             ["git", "commit", "-m", msg],
-            cwd=repo_root, capture_output=True, text=True, timeout=10,
+            cwd=repo_root, env=env, capture_output=True, text=True, timeout=10,
         )
         logger.debug("git commit: %s", r2.stderr.strip() or r2.stdout.strip())
 
         r3 = subprocess.run(
             ["git", "push"],
-            cwd=repo_root, capture_output=True, text=True, timeout=30,
+            cwd=repo_root, env=env, capture_output=True, text=True, timeout=30,
         )
         if r3.returncode == 0:
             logger.info("Git push 成功: %s", msg)
