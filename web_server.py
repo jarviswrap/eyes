@@ -492,10 +492,16 @@ async def api_export_pull(pull_id: int, user: dict = Depends(require_login)):
         filepath = REPORTS_DIR / filename
         filepath.write_text(md_content, encoding="utf-8")
         logger.info("导出报告: %s (%s bytes)", filepath, len(md_content))
-        _refresh_readme()
+        try:
+            _refresh_readme()
+        except Exception as e:
+            logger.error("_refresh_readme 失败: %s", e)
         ts_display = pull.pulled_at.strftime("%Y-%m-%d %H:%M") if pull.pulled_at else "unknown"
         uid = user.get("username", "unknown")
-        _git_commit_push(f"report export, from {pull.source} pulled at {ts_display} ({len(items)} projects) — by user:{uid}")
+        try:
+            _git_commit_push(f"report export, from {pull.source} pulled at {ts_display} ({len(items)} projects) — by user:{uid}")
+        except Exception as e:
+            logger.error("_git_commit_push 异常: %s", e)
         logger.info("导出响应准备返回")
 
         return {
@@ -987,11 +993,18 @@ async def api_export(snapshot_date: str, user: dict = Depends(require_login)):
         filepath = REPORTS_DIR / filename
         filepath.write_text(md_content, encoding="utf-8")
 
-        logger.info(f"导出报告: {filepath}")
-        _refresh_readme()
+        logger.info("导出报告: %s (%s bytes)", filepath, len(md_content))
+        try:
+            _refresh_readme()
+        except Exception as e:
+            logger.error("_refresh_readme 失败: %s", e)
         ts = pull.pulled_at.strftime("%Y-%m-%d %H:%M") if pull.pulled_at else snapshot_date
         uid = user.get("username", "unknown")
-        _git_commit_push(f"report export, from {pull.source} pulled at {ts} ({len(items)} projects) — by user:{uid}")
+        try:
+            _git_commit_push(f"report export, from {pull.source} pulled at {ts} ({len(items)} projects) — by user:{uid}")
+        except Exception as e:
+            logger.error("_git_commit_push 异常: %s", e)
+        logger.info("导出响应准备返回")
 
         return {
             "status": "ok",
