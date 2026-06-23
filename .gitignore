@@ -1,4 +1,3 @@
-reports/*.md
 data/
 logs/
 __pycache__/
