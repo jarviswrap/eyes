@@ -1,38 +1,70 @@
-# GitHub Weekly Trending 分析系统
+# GitHub Trending Eyes
 
-每天定时抓取 [GitHub Weekly Trending](https://github.com/trending?since=weekly) 前 20 项目，通过 DeepSeek LLM 逐一分析功能、技术栈、痛点、竞品，并汇总生成周趋势总结。所有数据存入本地 SQLite，提供 Web 仪表盘查看和报告导出。
+每日抓取 [GitHub Weekly Trending](https://github.com/trending?since=weekly) 前 20 项目，支持 DeepSeek LLM 手动触发四维度分析（功能 / 技术栈 / 痛点 / 竞品），并提供 Search API 自定义搜索。所有数据存入本地 SQLite，Web 仪表盘查看、导出 Markdown 报告。用户认证基于 [user-service](../user-service/) 的 JWT 方案，支持登录注册和角色权限控制。
 
 ## 快速开始
 
 ```bash
 pip install -r requirements.txt
-export LLM_API_KEY="sk-xxx"          # DeepSeek API Key（必需）
-export GITHUB_TOKEN="ghp_xxx"        # GitHub Token（可选）
 
-python main.py --run-once             # 立即执行一次
-python web_server.py                  # 启动 Web 仪表盘 → http://localhost:8080
+# 环境变量
+export LLM_API_KEY="sk-xxx"       # DeepSeek API Key（如需 LLM 分析）
+export JWT_SECRET="共享密钥"       # 与 user-service 一致（如需登录注册）
+
+# 启动 Web 仪表盘
+python web_server.py               # http://localhost:8080
 ```
 
 ## Web 仪表盘
 
-- **仪表盘** — 统计概览 + Top 10 + 重点关注 + 导出报告列表
-- **每日 Trending** — 按日期浏览排名，点击展开 LLM 分析详情，一键导出 Markdown
-- **项目详情** — 搜索项目，查看分析历史和排名记录
-- **周趋势总结** — LLM 生成的周趋势报告
-- **重点关注** — 近 5 天上榜 ≥2 次的项目
+| Tab | 功能 |
+|-----|------|
+| **Trendings** | 按时间倒序展示每次抓取的 Pull，展开查看项目列表，手动触发分析或生成总结 |
+| **Searching** | GitHub Search API 自定义查询（时间范围 / Fork 数 / 排序），结果自动保存为 Pull |
+| **Reports** | 已导出 Markdown 报告列表，点击可查看，支持删除 |
+| **设置** | 拉取数量、GitHub Token、定时 Pull 开关、自动分析开关（仅超级管理员可见） |
 
-页面顶部的操作按钮可直接触发抓取分析、守护进程启停。
+### 操作权限
+
+| 操作 | 未登录 | 普通用户 | 超管 |
+|------|:---:|:---:|:---:|
+| 浏览数据 | ✅ | ✅ | ✅ |
+| 搜索项目 | ✅ | ✅ | ✅ |
+| 开始分析 | - | ✅ | ✅ |
+| 导出报告 | - | ✅ | ✅ |
+| 立即抓取 | - | ✅ | ✅ |
+| 设置 | - | - | ✅ |
+
+## 数据抓取
+
+- **主方案**：抓取 `github.com/trending?since=weekly` 页面（真正的周 trending 数据，含总 star + 本周 star）
+- **备选方案**：GitHub Search API（Trending 页面抓取失败时降级使用）
+
+## 定时 Pull
+
+在设置页启用后，支持两种模式：
+- **once**：在指定时间执行一次，完成后自动停止
+- **interval**：从指定时间开始，每隔 N 小时重复执行（支持小数，如 0.5h = 30 分钟）
 
 ## 导出报告
 
-每日 Trending 页面支持将分析结果导出为 Markdown 文件，保存到 `reports/` 目录。
+展开 Pull 后可导出为 Markdown，保存到 `reports/` 目录。README 中报告列表自动刷新。
 
-| [trending-2026-06-22.md](reports/trending-2026-06-22.md) | [trending-2026-06-22-pull1.md](reports/trending-2026-06-22-pull1.md) | [trending-2026-06-22-045119.md](reports/trending-2026-06-22-045119.md) | [trending-2026-06-21.md](reports/trending-2026-06-21.md) |
+| [trending-2026-06-22-045119.md](reports/trending-2026-06-22-045119.md) | | | |
 
-## 定时运行
+## 配置文件
 
-```bash
-python main.py          # 启动守护进程，每天 config.yaml 配置的时间自动执行
+`config.yaml` 可调整：
+
+```yaml
+scheduler:
+  timezone: "Asia/Shanghai"
+
+llm:
+  api_key: "${LLM_API_KEY}"
+  model: "deepseek-chat"
+
+github:
+  token: "${GITHUB_TOKEN}"
+  per_page: 20
 ```
-
-配置文件 `config.yaml` 可调整运行时间、LLM 参数、数据库路径等。
