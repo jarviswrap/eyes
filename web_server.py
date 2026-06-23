@@ -114,6 +114,29 @@ def _on_once_done():
     logger.info("Once 任务已完成，调度器已自动停止")
 
 
+def _git_commit_push(commit_msg: str = ""):
+    """自动 git add + commit + push。非阻塞，静默失败。"""
+    import subprocess
+    try:
+        repo_root = Path(__file__).parent
+        subprocess.run(
+            ["git", "add", "reports/", "README.md"],
+            cwd=repo_root, capture_output=True, timeout=10,
+        )
+        msg = commit_msg or "auto: export reports"
+        subprocess.run(
+            ["git", "commit", "-m", msg],
+            cwd=repo_root, capture_output=True, timeout=10,
+        )
+        subprocess.run(
+            ["git", "push"],
+            cwd=repo_root, capture_output=True, timeout=30,
+        )
+        logger.info("Git 自动提交: %s", msg)
+    except Exception as e:
+        logger.warning("Git 自动提交失败（非致命）: %s", e)
+
+
 def _refresh_readme():
     """根据 reports/ 目录中的文件自动更新 README.md 中的导出报告表格。"""
     md_files = sorted(REPORTS_DIR.glob("trending-*.md"), reverse=True)
@@ -455,6 +478,8 @@ async def api_export_pull(pull_id: int, user: dict = Depends(require_login)):
         filepath.write_text(md_content, encoding="utf-8")
         logger.info(f"导出报告: {filepath}")
         _refresh_readme()
+        ts = pull.pulled_at.strftime("%Y-%m-%d %H:%M") if pull.pulled_at else "unknown"
+        _git_commit_push(f"report export, from {pull.source} pulled at {ts} ({len(items)} projects)")
 
         return {
             "status": "ok",
@@ -858,6 +883,28 @@ async def api_delete_report(filename: str):
     filepath.unlink()
     logger.info(f"删除报告: {filename}")
     _refresh_readme()
+
+    # 尝试匹配 pull 信息
+    ts_match = filename.replace("trending-", "").replace(".md", "")
+    try:
+        from datetime import datetime as dt
+        pull_time = dt.strptime(ts_match[:19], "%Y-%m-%d-%H%M%S")
+        ts_display = pull_time.strftime("%Y-%m-%d %H:%M")
+        s = get_session()
+        try:
+            pull = s.query(TrendingPull).filter(TrendingPull.pulled_at == pull_time).first()
+            if pull:
+                src = pull.source
+                cnt = pull.project_count
+            else:
+                src = "unknown"
+                cnt = 0
+        finally:
+            s.close()
+        _git_commit_push(f"report removed, from {src} pulled at {ts_display} ({cnt} projects)")
+    except ValueError:
+        _git_commit_push(f"report removed: {filename}")
+
     return {"status": "ok"}
 
 
@@ -924,6 +971,9 @@ async def api_export(snapshot_date: str):
         filepath.write_text(md_content, encoding="utf-8")
 
         logger.info(f"导出报告: {filepath}")
+        _refresh_readme()
+        ts = pull.pulled_at.strftime("%Y-%m-%d %H:%M") if pull.pulled_at else snapshot_date
+        _git_commit_push(f"report export, from {pull.source} pulled at {ts} ({len(items)} projects)")
 
         return {
             "status": "ok",
