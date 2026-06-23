@@ -491,10 +491,12 @@ async def api_export_pull(pull_id: int, user: dict = Depends(require_login)):
         filename = f"trending-{ts}.md"
         filepath = REPORTS_DIR / filename
         filepath.write_text(md_content, encoding="utf-8")
-        logger.info(f"导出报告: {filepath}")
+        logger.info("导出报告: %s (%s bytes)", filepath, len(md_content))
         _refresh_readme()
-        ts = pull.pulled_at.strftime("%Y-%m-%d %H:%M") if pull.pulled_at else "unknown"
-        _git_commit_push(f"report export, from {pull.source} pulled at {ts} ({len(items)} projects)")
+        ts_display = pull.pulled_at.strftime("%Y-%m-%d %H:%M") if pull.pulled_at else "unknown"
+        uid = user.get("username", "unknown")
+        _git_commit_push(f"report export, from {pull.source} pulled at {ts_display} ({len(items)} projects) — by user:{uid}")
+        logger.info("导出响应准备返回")
 
         return {
             "status": "ok",
@@ -924,7 +926,7 @@ async def api_delete_report(filename: str):
 
 
 @app.post("/api/export/{snapshot_date}")
-async def api_export(snapshot_date: str):
+async def api_export(snapshot_date: str, user: dict = Depends(require_login)):
     """导出某个 pull 的数据为 Markdown 报告。"""
     session = get_session()
     try:
@@ -988,7 +990,8 @@ async def api_export(snapshot_date: str):
         logger.info(f"导出报告: {filepath}")
         _refresh_readme()
         ts = pull.pulled_at.strftime("%Y-%m-%d %H:%M") if pull.pulled_at else snapshot_date
-        _git_commit_push(f"report export, from {pull.source} pulled at {ts} ({len(items)} projects)")
+        uid = user.get("username", "unknown")
+        _git_commit_push(f"report export, from {pull.source} pulled at {ts} ({len(items)} projects) — by user:{uid}")
 
         return {
             "status": "ok",
