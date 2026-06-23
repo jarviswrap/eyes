@@ -125,17 +125,21 @@ def _git_commit_push(commit_msg: str = ""):
         env = {**_os.environ, "GIT_SSH_COMMAND": "ssh -o StrictHostKeyChecking=no"}
 
         r1 = subprocess.run(
-            ["git", "add", "reports/", "README.md"],
+            ["git", "add", "-f", "reports/", "README.md"],
             cwd=repo_root, capture_output=True, text=True, timeout=10,
         )
-        logger.debug("git add: %s", r1.stderr.strip() or "ok")
+        if r1.returncode != 0:
+            logger.warning("git add 失败: %s", r1.stderr.strip())
 
         r2 = subprocess.run(
             ["git", "commit", "-m", msg],
             cwd=repo_root, env=env, capture_output=True, text=True, timeout=10,
         )
         committed = "nothing to commit" not in (r2.stdout + r2.stderr)
-        logger.debug("git commit: %s", r2.stderr.strip() or r2.stdout.strip())
+        if not committed:
+            logger.info("git commit 无变更，跳过 push")
+        elif r2.returncode != 0:
+            logger.warning("git commit 失败: %s", r2.stderr.strip())
 
         if committed:
             r3 = subprocess.run(
