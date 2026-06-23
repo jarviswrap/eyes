@@ -9,7 +9,7 @@ llm:
   provider: "deepseek"
   api_key: "${LLM_API_KEY}"  # 从环境变量读取
   base_url: "https://api.deepseek.com/v1"
-  model: "deepseek-chat"
+  model: "deepseek-v4-flash"
   max_tokens: 4096
   temperature: 0.3
   concurrency: 5             # LLM 并发请求数

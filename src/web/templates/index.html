@@ -770,7 +770,16 @@ async function refreshUser(){
   try{
     const token=getToken();
     if(!token){_currentUser=null;updateAuthUI();return}
-    const res=await fetchAuth(API+'/auth/me');
+    let res=await fetchAuth(API+'/auth/me');
+    // Token 过期 → 用 httpOnly cookie 中的 refresh_token 自动换新
+    if(res.status===401){
+      const rr=await fetch(API+'/auth/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+      if(rr.ok){
+        const rd=await rr.json();
+        setToken(rd.access_token);
+        res=await fetchAuth(API+'/auth/me');
+      }
+    }
     const d=await res.json();
     _currentUser=d.user||null;
   }catch(e){_currentUser=null}

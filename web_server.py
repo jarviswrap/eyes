@@ -1291,44 +1291,72 @@ async def api_search(data: dict):
 # Auth 代理
 # ═══════════════════════════════════════════════════════════
 
-async def _proxy_post(path: str, data: dict):
-    """通用代理 POST 到 user-service。"""
+from fastapi import Request as FastAPIRequest
+from fastapi.responses import JSONResponse
+
+
+async def _proxy_auth(path: str, data: dict, req: FastAPIRequest | None = None):
+    """通用代理到 user-service，转发 httpOnly cookie。"""
+    headers = {}
+    # 转发浏览器 cookie 到 user-service
+    if req and "cookie" in req.headers:
+        headers["Cookie"] = req.headers["cookie"]
+
     async with httpx.AsyncClient() as client:
-        r = await client.post(f"{USER_SERVICE_URL}{path}", json=data)
+        r = await client.post(f"{USER_SERVICE_URL}{path}", json=data, headers=headers)
         try:
             body = r.json()
         except Exception:
             body = {"detail": r.text}
-        # 输出 user-service 的完整响应用于调试
+
         logger.info("Proxy %s: status=%s", path, r.status_code)
         if r.status_code >= 400:
             raise HTTPException(r.status_code, detail=body.get("detail", str(body)))
-        return body
+
+        # 将 refresh_token 从 body 中提取并设置为 httpOnly cookie
+        rt = body.pop("refresh_token", None)
+        resp = JSONResponse(content=body)
+        if rt:
+            resp.set_cookie(
+                key="refresh_token",
+                value=rt,
+                httponly=True,
+                secure=False,       # 开发环境用 http，生产改为 True
+                samesite="lax",
+                max_age=7 * 24 * 3600,  # 7天
+                path="/api/auth",
+            )
+        return resp
 
 
 @app.post("/api/auth/login")
-async def proxy_login(data: dict):
-    return await _proxy_post("/api/auth/login", data)
+async def proxy_login(data: dict, req: FastAPIRequest = None):
+    return await _proxy_auth("/api/auth/login", data, req)
 
 
 @app.post("/api/auth/register")
-async def proxy_register(data: dict):
-    return await _proxy_post("/api/auth/register", data)
+async def proxy_register(data: dict, req: FastAPIRequest = None):
+    return await _proxy_auth("/api/auth/register", data, req)
 
 
 @app.post("/api/auth/refresh")
-async def proxy_refresh(data: dict):
-    return await _proxy_post("/api/auth/refresh", data)
+async def proxy_refresh(data: dict, req: FastAPIRequest = None):
+    # 优先从 cookie 读取 refresh_token，fallback 到 body
+    if not data.get("refresh_token"):
+        cookie_rt = req.cookies.get("refresh_token") if req else None
+        if cookie_rt:
+            data = {**data, "refresh_token": cookie_rt}
+    return await _proxy_auth("/api/auth/refresh", data, req)
 
 
 @app.post("/api/auth/verify-email")
-async def proxy_verify_email(data: dict):
-    return await _proxy_post("/api/auth/verify-email", data)
+async def proxy_verify_email(data: dict, req: FastAPIRequest = None):
+    return await _proxy_auth("/api/auth/verify-email", data, req)
 
 
 @app.post("/api/auth/resend-code")
 async def proxy_resend_code(data: dict):
-    return await _proxy_post("/api/auth/resend-code", data)
+    return await _proxy_auth("/api/auth/resend-code", data)
 
 
 @app.get("/api/auth/me")
