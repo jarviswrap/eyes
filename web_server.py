@@ -134,16 +134,20 @@ def _git_commit_push(commit_msg: str = ""):
             ["git", "commit", "-m", msg],
             cwd=repo_root, env=env, capture_output=True, text=True, timeout=10,
         )
+        committed = "nothing to commit" not in (r2.stdout + r2.stderr)
         logger.debug("git commit: %s", r2.stderr.strip() or r2.stdout.strip())
 
-        r3 = subprocess.run(
-            ["git", "push"],
-            cwd=repo_root, env=env, capture_output=True, text=True, timeout=30,
-        )
-        if r3.returncode == 0:
-            logger.info("Git push 成功: %s", msg)
+        if committed:
+            r3 = subprocess.run(
+                ["git", "push"],
+                cwd=repo_root, env=env, capture_output=True, text=True, timeout=30,
+            )
+            if r3.returncode == 0:
+                logger.info("Git push 成功: %s", msg)
+            else:
+                logger.warning("Git push 失败: %s", r3.stderr.strip())
         else:
-            logger.warning("Git push 失败: %s", r3.stderr.strip())
+            logger.info("Git commit 已是最新，跳过 push")
     except Exception as e:
         logger.warning("Git 自动提交异常: %s", e)
 
@@ -170,7 +174,7 @@ def _refresh_readme():
     # 找到 "## 导出报告" 行
     start = None
     for i, line in enumerate(lines):
-        if line.strip().startswith("## 导出报告"):
+        if line.strip().startswith("## 项目报告"):
             start = i
             break
     if start is None:
@@ -186,7 +190,7 @@ def _refresh_readme():
     # 重建：保留 start 之前，插入新内容，保留 end 之后
     prefix = "\n".join(lines[:start + 1]) + "\n\n"
     suffix = "\n" + "\n".join(lines[end:]) if end else ""
-    new_content = prefix + "每日 Trending 页面支持将分析结果导出为 Markdown 文件，保存到 `reports/` 目录。\n\n" + rows + suffix
+    new_content = prefix + "展开 Pull 后可导出为 Markdown，保存到 `reports/` 目录。README 中报告列表自动刷新。\n\n" + rows + suffix
     README_PATH.write_text(new_content.rstrip("\n") + "\n", encoding="utf-8")
 
 def get_session():
