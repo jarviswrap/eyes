@@ -167,6 +167,7 @@ tr:hover td{background:rgba(99,102,241,.03)}
   <div class="header-left">
     <div class="header-logo"><div class="icon">📊</div>GitHub Trending</div>
   </div>
+  <div id="scheduler-status" style="font-size:.78rem;color:var(--txt3);text-align:center"></div>
   <div style="display:flex;align-items:center;gap:12px">
     <span id="user-info" style="font-size:.82rem;color:var(--txt2)"><a href="#" onclick="showLogin()" style="font-size:.82rem">登录</a></span>
   </div>
@@ -682,7 +683,7 @@ async function triggerRunOnce(){
 
 function _settingRow(label, body, cls){return `<div class="setting-row${cls?' '+cls:''}"><label>${label}</label>${body}</div>`}
 function _toggle(name, checked){return `<label class="toggle"><input type="checkbox" name="${name}" ${checked?'checked':''} onchange="saveSetting('${name}',this.checked);onAutoPullChange()"><span class="slider"></span></label>`}
-function _num(name, val, min, max){return `<input type="number" name="${name}" min="${min}" max="${max}" value="${val}" onchange="saveSetting('${name}',this.value)">`}
+function _num(name, val, min, max, step){return `<input type="number" name="${name}" min="${min}" max="${max}" step="${step||'any'}" value="${val}" onchange="saveSetting('${name}',this.value)">`}
 function _select(name, val, opts, onchg){return `<select name="${name}" onchange="saveSetting('${name}',this.value);${onchg||''}" style="padding:8px 12px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.9rem">${opts.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}</select>`}
 
 function onAutoPullChange(){
@@ -706,23 +707,35 @@ async function loadSettings(){
   const el=$('#settings-form');
   el.innerHTML='<div class="loading"></div>';
   try{
-    const s=await fetch(API+'/settings').then(r=>r.json());
-    const ap=s.auto_pull==='true';
+    const s=await aFetch(API+'/settings').then(r=>r.json());
+    const ap=s.auto_pull==='true'||s.auto_pull==='True';
     const dim=ap?'1':'.4';
     el.innerHTML=`
       ${_settingRow('每次拉取项目数',_num('per_page',s.per_page||20,1,50))}
       ${_settingRow('GitHub Token',`<input type="text" name="github_token" value="${esc(s.github_token||'')}" onchange="saveSetting('github_token',this.value)" placeholder="ghp_xxx" style="width:200px;padding:8px 12px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.85rem">`)}
       <hr style="border:none;border-top:1px solid var(--border)">
       <div style="font-size:.8rem;color:var(--txt3);margin-bottom:-8px">自动化</div>
-      ${_settingRow('启用定时 Pull',_toggle('auto_pull',ap))}
+      ${_settingRow('启用定时 Pull',_toggle('auto_pull',ap||false))}
       <div class="row-schedule" style="opacity:${dim}">
-        ${_settingRow('开始 Pull 时间',`<input type="time" name="pull_start_time" value="${s.pull_start_time||'09:00'}" onchange="saveSetting('pull_start_time',this.value)" style="padding:8px 12px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.9rem">`)}
-        ${_settingRow('Pull 周期',_select('pull_period_mode',s.pull_period_mode||'interval',['once','interval'],'_toggleInterval()')+'<span class="row-interval" style="display:inline-flex;align-items:center;gap:4px">'+_num('pull_interval_hours',s.pull_interval_hours||24,1,168)+'<span style="font-size:.78rem;color:var(--txt3)">小时</span></span>')}
+        ${_settingRow('开始 Pull 时间',`<input type="time" name="pull_start_time" value="${s.pull_start_time||'09:00'}" onchange="saveSetting('pull_start_time',this.value)" style="padding:8px 12px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.9rem"><span style="font-size:.75rem;color:var(--txt3);margin-left:6px">Asia/Shanghai</span>`)}
+        ${_settingRow('Pull 周期',_select('pull_period_mode',s.pull_period_mode||'interval',['once','interval'],'_toggleInterval()')+'<span class="row-interval" style="display:inline-flex;align-items:center;gap:4px">'+_num('pull_interval_hours',s.pull_interval_hours||24,0.1,168)+'<span style="font-size:.78rem;color:var(--txt3)">小时</span></span>')}
         ${_settingRow('Pull 后自动分析',_toggle('auto_analyze',s.auto_analyze==='true'))}
       </div>
     `;
     setTimeout(()=>{onAutoPullChange();_toggleInterval()},50);
+    loadSchedulerStatus();
   }catch(e){el.innerHTML='<div class="empty">加载失败</div>'}
+}
+
+async function loadSchedulerStatus(){
+  try{
+    const st=await fetch(API+'/scheduler/status').then(r=>r.json());
+    const html=st.running
+      ?`<span style="color:var(--ok)">● 运行中</span> ${st.start_time} | ${st.period_mode} | ${st.interval_hours}h`
+      :`<span style="color:var(--txt3)">○ 已停止</span>`;
+    const hdr=$('#scheduler-status');
+    if(hdr)hdr.innerHTML=html;
+  }catch(e){}
 }
 
 async function saveSetting(key,value){
@@ -730,6 +743,7 @@ async function saveSetting(key,value){
     const body={};body[key]=value;
     await aFetch(API+'/settings',{method:'POST',body});
     showToast('✅ 已保存');
+    setTimeout(()=>loadSchedulerStatus(),500);
   }catch(e){showToast('❌ 保存失败')}
 }
 
@@ -899,7 +913,7 @@ function switchAuthTab(tab){
 
 // ── Startup ────────────────────────────────────────────
 
-refreshUser().then(()=>loadPulls());
+refreshUser().then(()=>{loadPulls();loadSchedulerStatus()});
 </script>
 </body>
 </html>

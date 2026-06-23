@@ -12,8 +12,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from .config import AppConfig
-from .database import CRUD, Database, get_crud, get_database
-from .fetcher import GitHubFetcher
+from .database import CRUD, Database, Repository, TrendingPullItem, TrendingPull, get_crud, get_database
+from .fetcher import GitHubFetcher, TrendingRepo
+from .analyzer import LLMAnalyzer
 from .tracker import ConsecutiveTracker
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,15 @@ class TrendingJob:
             token=config.github.token,
             per_page=config.github.per_page,
             request_delay=config.github.request_delay,
+        )
+        self.analyzer = LLMAnalyzer(
+            api_key=config.llm.api_key,
+            base_url=config.llm.base_url,
+            model=config.llm.model,
+            max_tokens=config.llm.max_tokens,
+            temperature=config.llm.temperature,
+            max_retries=config.llm.max_retries,
+            concurrency=config.llm.concurrency,
         )
         self.tracker = ConsecutiveTracker(self.crud)
 
@@ -124,13 +134,38 @@ class TrendingJob:
             logger.error(f"跟踪更新失败: {e}")
             result["errors"].append(f"tracker: {e}")
 
+        # ── 自动分析 ──
+        auto_analyze = self.crud.get_setting("auto_analyze", "false") == "true"
+        if auto_analyze and saved_repos:
+            logger.info("auto_analyze=true，触发自动批量分析")
+            try:
+                trending_data_list = [td for _, td in saved_repos]
+                analysis_results = await self.analyzer.analyze_batch(trending_data_list)
+                analyzed_count = 0
+                for (repo, _), (_, analysis) in zip(saved_repos, analysis_results):
+                    if analysis is not None:
+                        self.crud.save_analysis(
+                            repo_id=repo.id,
+                            functionality=analysis.functionality,
+                            tech_stack=analysis.tech_stack,
+                            pain_points=analysis.pain_points,
+                            competitors=analysis.competitors,
+                            raw_response=analysis.raw_response,
+                        )
+                        analyzed_count += 1
+                result["auto_analyzed"] = analyzed_count
+                logger.info("自动分析完成: %s/%s", analyzed_count, len(saved_repos))
+            except Exception as e:
+                logger.error("自动分析失败: %s", e)
+                result["errors"].append(f"auto_analyze: {e}")
+
         logger.info(f"每日任务完成: {result}")
         logger.info(f"{'='*60}")
         return result
 
 
 def create_scheduler(config: AppConfig) -> tuple[AsyncIOScheduler, TrendingJob]:
-    """创建并配置定时调度器。"""
+    """创建默认调度器（cron 模式，每天一次）。"""
     job = TrendingJob(config)
 
     scheduler = AsyncIOScheduler(timezone=config.scheduler.timezone)
@@ -146,8 +181,76 @@ def create_scheduler(config: AppConfig) -> tuple[AsyncIOScheduler, TrendingJob]:
     )
 
     logger.info(
-        f"定时任务已配置: 每天 {config.scheduler.run_time} "
-        f"({config.scheduler.timezone})"
+        "定时任务已配置: 每天 %s (%s)",
+        config.scheduler.run_time, config.scheduler.timezone
     )
+
+    return scheduler, job
+
+
+def create_scheduler_with_settings(
+    config: AppConfig,
+    start_time: str = "09:00",
+    period_mode: str = "interval",
+    interval_hours: float = 24,
+    on_once_complete: callable = None,
+) -> tuple[AsyncIOScheduler, TrendingJob]:
+    """根据设置创建调度器。
+
+    period_mode:
+      - "once": 在 start_time 执行一次，完成后回调 on_once_complete
+      - "interval": 每 interval_hours 小时重复执行
+    """
+    job = TrendingJob(config)
+    scheduler = AsyncIOScheduler(timezone=config.scheduler.timezone)
+
+    if period_mode == "once":
+        hour, minute = start_time.split(":")
+        from apscheduler.triggers.date import DateTrigger
+        from datetime import datetime as dt, timedelta
+
+        # 计算执行时间：如果今天的时间已过，则明天执行
+        now = dt.now()
+        run_at = now.replace(hour=int(hour), minute=int(minute), second=0, microsecond=0)
+        if run_at <= now:
+            run_at += timedelta(days=1)
+
+        trigger = DateTrigger(run_date=run_at)
+
+        async def once_wrapper():
+            result = await job.run_once()
+            logger.info("Once 任务执行完成: %s", result)
+            if on_once_complete:
+                on_once_complete()
+
+        scheduler.add_job(
+            once_wrapper,
+            trigger=trigger,
+            id="trending_once",
+            name="GitHub Trending 单次抓取",
+            replace_existing=True,
+        )
+        logger.info("定时任务已配置: 单次执行 %s", run_at.strftime("%Y-%m-%d %H:%M"))
+    else:
+        from apscheduler.triggers.interval import IntervalTrigger
+        from datetime import datetime as dt, timedelta
+
+        # 计算 start_date：对齐到 start_time
+        hour, minute = start_time.split(":")
+        now = dt.now()
+        first_run = now.replace(hour=int(hour), minute=int(minute), second=0, microsecond=0)
+        while first_run <= now:
+            first_run += timedelta(hours=interval_hours)
+
+        trigger = IntervalTrigger(hours=interval_hours, start_date=first_run)
+
+        scheduler.add_job(
+            job.run_once,
+            trigger=trigger,
+            id="trending_interval",
+            name=f"GitHub Trending 每{interval_hours}小时抓取",
+            replace_existing=True,
+        )
+        logger.info("定时任务已配置: start=%s, 每 %s 小时", first_run.strftime("%Y-%m-%d %H:%M"), interval_hours)
 
     return scheduler, job

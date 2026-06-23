@@ -29,6 +29,7 @@ from src.database import (
 from main import (
     load_config,
     run_once as main_run_once,
+    start_scheduler,
 )
 from src.analyzer import LLMAnalyzer
 from src.summarizer import WeeklySummarizer
@@ -48,6 +49,69 @@ TEMPLATES_DIR = Path(__file__).parent / "src" / "web" / "templates"
 REPORTS_DIR = Path(__file__).parent / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 README_PATH = Path(__file__).parent / "README.md"
+
+# 自动恢复定时 Pull
+def _auto_restore_scheduler():
+    """启动时检查是否启用定时 Pull，若启用则自动启动调度器。"""
+    from src.database import get_crud
+    global _scheduler_instance
+    crud = get_crud(_config.database.path)
+    if crud.get_setting("auto_pull", "false") == "true":
+        start_time = crud.get_setting("pull_start_time", "09:00")
+        period_mode = crud.get_setting("pull_period_mode", "interval")
+        interval_hours = float(crud.get_setting("pull_interval_hours", "24"))
+        logger.info("检测到 auto_pull=true，自动启动调度器 mode=%s", period_mode)
+        try:
+            _scheduler_instance = start_scheduler(
+                _config, start_time, period_mode, interval_hours,
+                on_once_complete=_on_once_done,
+            )
+            logger.info("调度器已自动恢复")
+        except Exception as e:
+            logger.error("自动启动调度器失败: %s", e)
+
+
+def _restart_scheduler():
+    """根据最新设置重启调度器。"""
+    global _scheduler_instance
+    from src.database import get_crud
+    crud = get_crud(_config.database.path)
+
+    # 停止旧调度器
+    if _scheduler_instance:
+        try:
+            _scheduler_instance.shutdown(wait=False)
+        except Exception:
+            pass
+        _scheduler_instance = None
+
+    # 如果 auto_pull 未启用，不启动
+    if crud.get_setting("auto_pull", "false") != "true":
+        logger.info("auto_pull=false，调度器已停止")
+        return
+
+    start_time = crud.get_setting("pull_start_time", "09:00")
+    period_mode = crud.get_setting("pull_period_mode", "interval")
+    interval_hours = float(crud.get_setting("pull_interval_hours", "24"))
+
+    try:
+        _scheduler_instance = start_scheduler(
+            _config, start_time, period_mode, interval_hours,
+            on_once_complete=_on_once_done,
+        )
+        logger.info("调度器已按新设置重启: %s %s %sh", start_time, period_mode, interval_hours)
+    except Exception as e:
+        logger.error("调度器重启失败: %s", e)
+
+
+def _on_once_done():
+    """once 模式执行完成后的回调。"""
+    from src.database import get_crud
+    global _scheduler_instance
+    crud = get_crud(_config.database.path)
+    crud.set_setting("auto_pull", "false")
+    _scheduler_instance = None
+    logger.info("Once 任务已完成，调度器已自动停止")
 
 
 def _refresh_readme():
@@ -148,10 +212,19 @@ async def require_super_admin(user: dict = Depends(require_login)) -> dict:
 
 # ── FastAPI 应用 ──────────────────────────────────────────
 
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app):
+    _auto_restore_scheduler()
+    yield
+
+
 app = FastAPI(
     title="GitHub Trending 分析系统",
     description="每日 GitHub Weekly Trending 项目分析与趋势追踪",
     version="2.0.0",
+    lifespan=lifespan,
 )
 
 
@@ -968,6 +1041,21 @@ async def _auto_analyze_pull(pull_id: int):
         session.close()
 
 
+@app.get("/api/scheduler/status")
+async def api_scheduler_status():
+    """调度器运行状态。"""
+    global _scheduler_instance
+    from src.database import get_crud
+    crud = get_crud(_config.database.path)
+    return {
+        "running": _scheduler_instance is not None,
+        "auto_pull": crud.get_setting("auto_pull", "false") == "true",
+        "start_time": crud.get_setting("pull_start_time", "09:00"),
+        "period_mode": crud.get_setting("pull_period_mode", "interval"),
+        "interval_hours": crud.get_setting("pull_interval_hours", "24"),
+    }
+
+
 # ═══════════════════════════════════════════════════════════
 # 设置 API
 # ═══════════════════════════════════════════════════════════
@@ -988,21 +1076,26 @@ async def api_save_settings(data: dict, user: dict = Depends(require_super_admin
     allowed = {"per_page", "auto_analyze", "auto_pull",
                "pull_start_time", "pull_period_mode", "pull_interval_hours",
                "github_token"}
+    restart_keys = {"auto_pull", "pull_start_time", "pull_period_mode", "pull_interval_hours"}
+    need_restart = False
+
     for k, v in data.items():
         if k in allowed:
-            crud.set_setting(k, str(v))
+            if isinstance(v, bool):
+                v = "true" if v else "false"
+            else:
+                v = str(v)
+            crud.set_setting(k, v)
+            if k in restart_keys:
+                need_restart = True
             if k == "github_token":
                 logger.info("设置已更新: %s = ***", k)
             else:
                 logger.info("设置已更新: %s = %s", k, v)
 
-    # 同步全局配置
     _config.github.per_page = int(crud.get_setting("per_page", "20"))
-    _config.scheduler.run_time = (
-        crud.get_setting("pull_interval_hours", "24") + ":00"
-        if crud.get_setting("auto_pull", "false") == "true"
-        else _config.scheduler.run_time
-    )
+    if need_restart:
+        _restart_scheduler()
 
     return {"status": "ok"}
 

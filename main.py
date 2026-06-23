@@ -99,19 +99,21 @@ def run_daemon(config: AppConfig):
         logger.info("调度器已关闭")
 
 
-def start_scheduler(config: AppConfig):
+def start_scheduler(config: AppConfig, start_time: str = "09:00",
+                    period_mode: str = "interval", interval_hours: int = 24,
+                    on_once_complete: callable = None):
     """启动调度器并返回 scheduler 对象（非阻塞）。
 
-    供外部（如 web_server）调用，可以在同一事件循环中管理调度器生命周期。
-
-    Returns:
-        scheduler 实例，可通过 .start() / .shutdown() 控制
+    period_mode: "once" | "interval"
+    on_once_complete: once 模式执行完成后的回调（用于停调度器）
     """
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    scheduler, job = create_scheduler(config)
+    from src.scheduler import create_scheduler_with_settings
+    scheduler, job = create_scheduler_with_settings(
+        config, start_time, period_mode, interval_hours, on_once_complete
+    )
     scheduler.start()
     logger = logging.getLogger("main")
-    logger.info(f"调度器已启动: 每天 {config.scheduler.run_time}")
+    logger.info("调度器已启动: mode=%s", period_mode)
     return scheduler
 
 

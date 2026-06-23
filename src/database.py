@@ -481,7 +481,11 @@ class CRUD:
         }
         with self.db.get_session() as session:
             for s in session.query(AppSetting).all():
-                defaults[s.key] = s.value
+                v = s.value
+                # 兼容历史脏数据：布尔值统一转小写
+                if v in ("True", "False"):
+                    v = v.lower()
+                defaults[s.key] = v
         return defaults
 
 
