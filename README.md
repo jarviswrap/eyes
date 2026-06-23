@@ -39,7 +39,7 @@ python web_server.py               # http://localhost:8080
 
 展开 Pull 后可导出为 Markdown，保存到 `reports/` 目录。README 中报告列表自动刷新。
 
-暂无导出报告。
+| [trending-2026-06-23-131909.md](reports/trending-2026-06-23-131909.md) | [trending-2026-06-23-131531.md](reports/trending-2026-06-23-131531.md) |  |  |
 
 ## 配置文件
 
