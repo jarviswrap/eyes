@@ -25,4 +25,3 @@ database:
 
 output:
   log_level: "INFO"
-  log_file: "logs/app.log"

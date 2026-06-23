@@ -42,7 +42,6 @@ class DatabaseConfig:
 @dataclass
 class OutputConfig:
     log_level: str = "INFO"
-    log_file: str = "logs/app.log"
 
 
 @dataclass

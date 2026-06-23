@@ -12,6 +12,7 @@
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -19,45 +20,12 @@ from pathlib import Path
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).parent))
 
+# 加载 logutil 日志模块
+sys.path.insert(0, str(Path(__file__).parent.parent / "deploy"))
+from logutil import setup_logging, get_logger
+
 from src.config import load_config, AppConfig
 from src.scheduler import create_scheduler, TrendingJob
-
-
-def setup_logging(config: AppConfig):
-    """配置日志系统。"""
-    log_file = Path(config.output.log_file)
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-
-    log_level = getattr(logging, config.output.log_level.upper(), logging.INFO)
-
-    formatter = logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
-    # 文件处理器
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setLevel(log_level)
-    file_handler.setFormatter(formatter)
-
-    # 控制台处理器：Windows 环境下使用 UTF-8 + 错误替换策略
-    import io
-    console_handler = logging.StreamHandler(
-        io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    )
-    console_handler.setLevel(log_level)
-    console_handler.setFormatter(formatter)
-
-    logging.basicConfig(
-        level=log_level,
-        handlers=[file_handler, console_handler],
-    )
-
-    # 降低第三方库的日志等级
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("apscheduler").setLevel(logging.WARNING)
-    logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
-    logging.getLogger("openai").setLevel(logging.WARNING)
 
 
 async def dry_run(config: AppConfig):
@@ -180,20 +148,20 @@ def main():
     try:
         config = load_config(args.config)
     except FileNotFoundError as e:
-        print(f"❌ {e}")
-        print("请确保配置文件存在，或使用 --config 指定路径")
+        sys.stderr.write(f"❌ {e}\n请确保配置文件存在，或使用 --config 指定路径\n")
         sys.exit(1)
     except Exception as e:
-        print(f"❌ 配置加载失败: {e}")
+        sys.stderr.write(f"❌ 配置加载失败: {e}\n")
         sys.exit(1)
 
     # 配置日志
-    setup_logging(config)
-    logger = logging.getLogger("main")
+    log_dir = str(Path(__file__).parent.parent / "deploy" / "logs")
+    setup_logging("eyes", log_dir=log_dir)
+    logger = get_logger("main")
 
     logger.info("GitHub Weekly Trending 每日分析系统 启动")
-    logger.info(f"LLM: {config.llm.provider} | 模型: {config.llm.model}")
-    logger.info(f"数据库: {config.database.path}")
+    logger.info("LLM: %s | 模型: %s", config.llm.provider, config.llm.model)
+    logger.info("数据库: %s", config.database.path)
 
     # 根据参数选择运行模式
     if args.dry_run:

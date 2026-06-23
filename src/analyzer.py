@@ -129,7 +129,7 @@ class LLMAnalyzer:
                 logger.error(f"无法分析 {repo.full_name}: LLM API key 未配置")
                 return None
 
-            logger.info(f"开始分析: {repo.full_name}")
+            logger.debug("分析中: %s", repo.full_name)
 
             # 1. 获取 README
             readme = await self.fetch_readme(repo.full_name)
@@ -161,7 +161,7 @@ class LLMAnalyzer:
                     # 解析 JSON
                     parsed = self._parse_json_response(content)
                     if parsed:
-                        logger.info(f"分析完成: {repo.full_name}")
+                        logger.debug("分析完成: %s", repo.full_name)
                         return ProjectAnalysisResult(
                             functionality=parsed.get("functionality", ""),
                             tech_stack=parsed.get("tech_stack", ""),
@@ -170,16 +170,12 @@ class LLMAnalyzer:
                             raw_response=content,
                         )
                     else:
-                        logger.warning(
-                            f"JSON 解析失败 ({repo.full_name})，重试 {attempt}/{self.max_retries}"
-                        )
+                        logger.warning("JSON 解析失败 (%s)，重试 %s/%s", repo.full_name, attempt, self.max_retries)
                         if attempt < self.max_retries:
                             await asyncio.sleep(2 * attempt)
 
                 except Exception as e:
-                    logger.error(
-                        f"LLM 调用异常 ({repo.full_name})，重试 {attempt}/{self.max_retries}: {e}"
-                    )
+                    logger.error("LLM 调用异常 (%s)，重试 %s/%s: %s", repo.full_name, attempt, self.max_retries, e)
                     if attempt < self.max_retries:
                         await asyncio.sleep(2 * attempt)
 
@@ -188,8 +184,11 @@ class LLMAnalyzer:
 
     async def analyze_batch(self, repos: list[TrendingRepo]) -> list[tuple[TrendingRepo, Optional[ProjectAnalysisResult]]]:
         """批量分析多个项目（并发控制）。"""
+        logger.info("开始批量分析: %d 个项目, 并发 %d", len(repos), self.concurrency)
         tasks = [self.analyze_single(repo) for repo in repos]
         results = await asyncio.gather(*tasks)
+        success = sum(1 for r in results if r is not None)
+        logger.info("批量分析完成: %d/%d 成功", success, len(repos))
         return list(zip(repos, results))
 
     @staticmethod

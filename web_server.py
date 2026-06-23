@@ -2,7 +2,6 @@
 
 import argparse
 import asyncio
-import logging
 import os
 import sys
 from datetime import date, datetime, timezone
@@ -16,6 +15,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import func as sa_func
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "deploy"))
+from logutil import setup_logging, get_logger
 
 from src.database import (
     Database,
@@ -26,19 +27,19 @@ from src.database import (
     ConsecutiveTracking,
 )
 from main import (
-    setup_logging,
     load_config,
     run_once as main_run_once,
 )
 from src.analyzer import LLMAnalyzer
 from src.summarizer import WeeklySummarizer
 
-logger = logging.getLogger("web_server")
+logger = get_logger("web_server")
 
 # ── 全局状态 ──────────────────────────────────────────────
 _scheduler_instance = None
 _config = load_config()
-setup_logging(_config)
+log_dir = str(Path(__file__).parent.parent / "deploy" / "logs")
+setup_logging("eyes", log_dir=log_dir)
 
 # ── 组件初始化 ──────────────────────────────────────────
 db = Database(_config.database.path)
@@ -990,7 +991,10 @@ async def api_save_settings(data: dict, user: dict = Depends(require_super_admin
     for k, v in data.items():
         if k in allowed:
             crud.set_setting(k, str(v))
-            logger.info(f"设置已更新: {k} = {v}")
+            if k == "github_token":
+                logger.info("设置已更新: %s = ***", k)
+            else:
+                logger.info("设置已更新: %s = %s", k, v)
 
     # 同步全局配置
     _config.github.per_page = int(crud.get_setting("per_page", "20"))
@@ -1016,13 +1020,21 @@ async def api_search(data: dict):
 
     token = data.get("token", "") or crud.get_setting("github_token", "")
     per_page = int(data.get("per_page", 20))
+    params = {
+        "period": int(data.get("search_period_days", 7)),
+        "forks_min": int(data.get("search_min_forks", 3)),
+        "sort": data.get("search_sort", "stars"),
+        "order": data.get("search_order", "desc"),
+        "per_page": per_page,
+    }
+    logger.info("Search 请求: %s", params)
     fetcher = GitHubFetcher(
         token=token,
         per_page=per_page,
-        search_period_days=int(data.get("search_period_days", 7)),
-        search_sort=data.get("search_sort", "stars"),
-        search_order=data.get("search_order", "desc"),
-        search_min_forks=int(data.get("search_min_forks", 3)),
+        search_period_days=params["period"],
+        search_sort=params["sort"],
+        search_order=params["order"],
+        search_min_forks=params["forks_min"],
     )
 
     try:
@@ -1031,7 +1043,10 @@ async def api_search(data: dict):
         return {"status": "error", "message": str(e)}
 
     if not repos:
+        logger.info("Search 完成: 0 个结果")
         return {"status": "ok", "count": 0, "pull_id": None, "repos": []}
+
+    logger.info("Search 完成: %s 个结果", len(repos))
 
     # 保存为 pull 记录
     session = get_session()
@@ -1107,7 +1122,7 @@ async def _proxy_post(path: str, data: dict):
         except Exception:
             body = {"detail": r.text}
         # 输出 user-service 的完整响应用于调试
-        logger.info(f"Proxy {path}: status={r.status_code} body={body}")
+        logger.info("Proxy %s: status=%s", path, r.status_code)
         if r.status_code >= 400:
             raise HTTPException(r.status_code, detail=body.get("detail", str(body)))
         return body

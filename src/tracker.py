@@ -45,10 +45,7 @@ class ConsecutiveTracker:
                     )
                     session.add(tracking)
                     if appearance_count >= 2:
-                        logger.info(
-                            f"[HIGHLIGHT] {repo.full_name} "
-                            f"近一周上榜 {appearance_count} 天！"
-                        )
+                        logger.info("[HIGHLIGHT] %s 近一周上榜 %s 天", repo.full_name, appearance_count)
                 else:
                     tracking.last_seen = reference_date
                     tracking.appearance_days = appearance_count
@@ -56,15 +53,9 @@ class ConsecutiveTracker:
                     tracking.is_active = appearance_count >= 2
 
                     if tracking.is_active and not was_active:
-                        logger.info(
-                            f"[HIGHLIGHT] {repo.full_name} "
-                            f"近一周上榜 {appearance_count} 天！"
-                        )
+                        logger.info("[HIGHLIGHT] %s 近一周上榜 %s 天", repo.full_name, appearance_count)
                     elif not tracking.is_active and was_active:
-                        logger.info(
-                            f"[UNHIGHLIGHT] {repo.full_name} "
-                            f"近一周上榜降至 {appearance_count} 天"
-                        )
+                        logger.info("[UNHIGHLIGHT] %s 近一周上榜降至 %s 天", repo.full_name, appearance_count)
 
             # 更新不在本次列表中的仓库的统计
             all_tracked = self.crud.get_all_consecutive_tracking()
