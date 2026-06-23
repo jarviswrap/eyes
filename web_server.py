@@ -119,22 +119,30 @@ def _git_commit_push(commit_msg: str = ""):
     import subprocess
     try:
         repo_root = Path(__file__).parent
-        subprocess.run(
-            ["git", "add", "reports/", "README.md"],
-            cwd=repo_root, capture_output=True, timeout=10,
-        )
         msg = commit_msg or "auto: export reports"
-        subprocess.run(
+
+        r1 = subprocess.run(
+            ["git", "add", "reports/", "README.md"],
+            cwd=repo_root, capture_output=True, text=True, timeout=10,
+        )
+        logger.debug("git add: %s", r1.stderr.strip() or "ok")
+
+        r2 = subprocess.run(
             ["git", "commit", "-m", msg],
-            cwd=repo_root, capture_output=True, timeout=10,
+            cwd=repo_root, capture_output=True, text=True, timeout=10,
         )
-        subprocess.run(
+        logger.debug("git commit: %s", r2.stderr.strip() or r2.stdout.strip())
+
+        r3 = subprocess.run(
             ["git", "push"],
-            cwd=repo_root, capture_output=True, timeout=30,
+            cwd=repo_root, capture_output=True, text=True, timeout=30,
         )
-        logger.info("Git 自动提交: %s", msg)
+        if r3.returncode == 0:
+            logger.info("Git push 成功: %s", msg)
+        else:
+            logger.warning("Git push 失败: %s", r3.stderr.strip())
     except Exception as e:
-        logger.warning("Git 自动提交失败（非致命）: %s", e)
+        logger.warning("Git 自动提交异常: %s", e)
 
 
 def _refresh_readme():
