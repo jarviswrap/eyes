@@ -443,6 +443,7 @@ def _build_pull_detail(session, pull: TrendingPull) -> dict:
             "stars": item.stars,
             "stars_week": item.stars_week,
             "forks": item.forks,
+            "created_at": item.created_at or "",
             "appearance_days": appearance_days,
             "analysis_status": "done" if analysis else "none",
             "analyzed_at": analysis.analyzed_at.isoformat() + "Z" if analysis and analysis.analyzed_at else None,
@@ -1381,6 +1382,7 @@ async def api_search(data: dict):
                     stars=repo_data.stars,
                     stars_week=0,
                     forks=repo_data.forks,
+                    created_at=repo_data.created_at or None,
                 )
                 saved += 1
             except Exception as e:
@@ -1413,6 +1415,7 @@ async def api_search(data: dict):
                     "language": r.language,
                     "stars": r.stars,
                     "forks": r.forks,
+                    "created_at": r.created_at,
                 }
                 for r in repos[:saved]
             ],

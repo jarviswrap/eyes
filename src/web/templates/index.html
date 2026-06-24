@@ -357,6 +357,7 @@ async function togglePull(el, id){
         <span style="min-width:80px;text-align:center">语言</span>
         <span class="stars">Stars</span>
         <span class="stars">Forks</span>
+        <span style="min-width:95px;text-align:center;font-size:.75rem">创建时间</span>
       </div>`;
     }else{
       h+=`<div class="project-row" style="color:var(--txt3);font-size:.75rem;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);background:rgba(0,0,0,.15)">
@@ -376,6 +377,7 @@ async function togglePull(el, id){
         :`<button class="btn-sm analyze-btn" data-repo="${it.repo_id}" onclick="event.stopPropagation();if(needLogin())return;analyzeProject(${it.repo_id})" title="分析">🧠</button>`;
 
       if(isSearch){
+        const created=it.created_at?new Date(it.created_at).toLocaleDateString('zh-CN'):'-';
         h+=`<div class="project-row" id="proj-${it.repo_id}-${id}" onclick="showDetail(${it.repo_id})" style="cursor:pointer">
           <span class="rank">#${it.rank}</span>
           <span class="name"><a href="${esc(it.url)}" target="_blank" title="${esc(it.description)}" onclick="event.stopPropagation()">${esc(it.full_name)}</a></span>
@@ -383,6 +385,7 @@ async function togglePull(el, id){
           <span style="min-width:80px;text-align:center;font-size:.8rem;color:var(--txt2)">${esc(it.language||'?')}</span>
           <span class="stars">★ ${fmt(it.stars)}</span>
           <span class="stars">${fmt(it.forks)}</span>
+          <span style="min-width:95px;text-align:center;font-size:.78rem;color:var(--txt3);white-space:nowrap">${created}</span>
         </div>`;
       }else{
         h+=`<div class="project-row" id="proj-${it.repo_id}-${id}" onclick="showDetail(${it.repo_id})" style="cursor:pointer">
@@ -589,8 +592,9 @@ async function doSearch(){
     const data=await aFetch(API+'/search',{method:'POST',body}).then(r=>r.json());
     if(data.status!=='ok'){el.innerHTML=`<div class="empty">${esc(data.message)}</div>`;return}
     if(!data.repos.length){el.innerHTML='<div class="empty">无结果</div>';return}
-    let h=`<div class="card"><div class="card-header">${data.count} 个结果</div><div class="table-wrap"><table><thead><tr><th>#</th><th>项目</th><th>描述</th><th>语言</th><th>Stars</th><th>Forks</th></tr></thead><tbody>`;
+    let h=`<div class="card"><div class="card-header">${data.count} 个结果</div><div class="table-wrap"><table><thead><tr><th>#</th><th>项目</th><th>描述</th><th>语言</th><th>Stars</th><th>Forks</th><th>创建时间</th></tr></thead><tbody>`;
     data.repos.forEach(r=>{
+      const created=r.created_at?new Date(r.created_at).toLocaleDateString('zh-CN'):'-';
       h+=`<tr>
         <td>${r.rank}</td>
         <td><a href="${esc(r.url)}" target="_blank" style="font-weight:600;color:var(--ac3)">${esc(r.full_name)}</a></td>
@@ -598,6 +602,7 @@ async function doSearch(){
         <td style="font-size:.8rem">${esc(r.language||'?')}</td>
         <td>★ ${fmt(r.stars)}</td>
         <td>${fmt(r.forks)}</td>
+        <td style="font-size:.78rem;color:var(--txt3);white-space:nowrap">${created}</td>
       </tr>`;
     });
     h+='</tbody></table></div></div>';

@@ -29,6 +29,7 @@ class TrendingRepo:
     stars_week: int         # 本周 stars
     forks: int              # 总 forks
     rank: int               # 排名 1-20
+    created_at: str = ""    # 仓库创建时间（ISO 8601）
 
     def __repr__(self):
         return f"<TrendingRepo(#{self.rank} {self.full_name} stars:{self.stars})>"
@@ -244,6 +245,7 @@ class GitHubFetcher:
                         stars_week=0,
                         forks=item["forks_count"],
                         rank=idx + 1,
+                        created_at=item.get("created_at") or "",
                     ))
 
                 logger.info(f"Search API 返回 {len(repos)} 个仓库（备选）")

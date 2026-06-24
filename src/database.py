@@ -89,6 +89,7 @@ class TrendingPullItem(Base):
     stars: Mapped[int] = Column(Integer, nullable=False, default=0)
     stars_week: Mapped[int] = Column(Integer, nullable=False, default=0)
     forks: Mapped[int] = Column(Integer, nullable=False, default=0)
+    created_at: Mapped[Optional[str]] = Column(String(64), nullable=True)
 
     pull = relationship("TrendingPull", back_populates="items")
     repository = relationship("Repository", back_populates="pull_items")
@@ -243,6 +244,7 @@ class CRUD:
         stars: int = 0,
         stars_week: int = 0,
         forks: int = 0,
+        created_at: Optional[str] = None,
     ):
         """向 pull 添加一个项目。"""
         with self.db.get_session() as session:
@@ -256,6 +258,8 @@ class CRUD:
                 existing.stars = stars
                 existing.stars_week = stars_week
                 existing.forks = forks
+                if created_at is not None:
+                    existing.created_at = created_at
             else:
                 item = TrendingPullItem(
                     pull_id=pull_id,
@@ -264,6 +268,7 @@ class CRUD:
                     stars=stars,
                     stars_week=stars_week,
                     forks=forks,
+                    created_at=created_at,
                 )
                 session.add(item)
             session.commit()
