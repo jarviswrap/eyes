@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import os
 import sys
+import threading
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -38,6 +39,7 @@ logger = get_logger("web_server")
 
 # ── 全局状态 ──────────────────────────────────────────────
 _scheduler_instance = None
+_scheduler_lock = threading.Lock()
 _config = load_config()
 log_dir = str(Path(__file__).parent.parent / "deploy" / "logs")
 setup_logging("eyes", log_dir=log_dir)
@@ -55,53 +57,93 @@ def _auto_restore_scheduler():
     """启动时检查是否启用定时 Pull，若启用则自动启动调度器。"""
     from src.database import get_crud
     global _scheduler_instance
-    crud = get_crud(_config.database.path)
-    if crud.get_setting("auto_pull", "false") == "true":
+    with _scheduler_lock:
+        crud = get_crud(_config.database.path)
+
+        # ── 自愈：检查并清理历史重复 pull ──
+        dup_removed = crud.dedup_all_pulls()
+        if dup_removed > 0:
+            logger.warning("自愈清理: 移除了 %d 条历史重复 pull", dup_removed)
+
+        # ── 自愈：清理僵尸锁（PID 不存在但锁还在） ──
+        owner = crud.get_scheduler_owner()
+        if owner and not owner["is_alive"]:
+            logger.warning("检测到僵尸调度器锁 PID=%s，自动释放", owner["pid"])
+            crud.release_scheduler_lock()
+
+        if crud.get_setting("auto_pull", "false") == "true":
+            start_time = crud.get_setting("pull_start_time", "09:00")
+            period_mode = crud.get_setting("pull_period_mode", "interval")
+            interval_hours = float(crud.get_setting("pull_interval_hours", "24"))
+            logger.info("检测到 auto_pull=true，自动启动调度器 mode=%s", period_mode)
+
+            if not crud.acquire_scheduler_lock(mode="web_server"):
+                owner = crud.get_scheduler_owner()
+                logger.warning(
+                    "无法获取调度器锁，已有调度器运行中: PID=%s mode=%s",
+                    owner["pid"] if owner else "?", owner["mode"] if owner else "?"
+                )
+                return
+
+            try:
+                _scheduler_instance = start_scheduler(
+                    _config, start_time, period_mode, interval_hours,
+                    on_once_complete=_on_once_done,
+                )
+                logger.info("调度器已自动恢复")
+            except Exception as e:
+                crud.release_scheduler_lock()
+                logger.error("自动启动调度器失败: %s", e)
+
+
+def _restart_scheduler():
+    """根据最新设置重启调度器。加锁防并发，含跨进程互斥。"""
+    global _scheduler_instance
+    if not _scheduler_lock.acquire(blocking=False):
+        logger.warning("调度器正在重启中，跳过本次请求")
+        return
+    try:
+        from src.database import get_crud
+        crud = get_crud(_config.database.path)
+
+        # 停止旧调度器（等待当前任务完成）
+        if _scheduler_instance:
+            try:
+                _scheduler_instance.shutdown(wait=True)
+            except Exception:
+                pass
+            _scheduler_instance = None
+            crud.release_scheduler_lock()
+
+        # 如果 auto_pull 未启用，不启动
+        if crud.get_setting("auto_pull", "false") != "true":
+            logger.info("auto_pull=false，调度器已停止")
+            return
+
         start_time = crud.get_setting("pull_start_time", "09:00")
         period_mode = crud.get_setting("pull_period_mode", "interval")
         interval_hours = float(crud.get_setting("pull_interval_hours", "24"))
-        logger.info("检测到 auto_pull=true，自动启动调度器 mode=%s", period_mode)
+
+        # 获取跨进程互斥锁
+        if not crud.acquire_scheduler_lock(mode="web_server"):
+            owner = crud.get_scheduler_owner()
+            logger.warning(
+                "无法获取调度器锁，已有调度器运行中: PID=%s mode=%s",
+                owner["pid"] if owner else "?", owner["mode"] if owner else "?"
+            )
+            return
+
         try:
             _scheduler_instance = start_scheduler(
                 _config, start_time, period_mode, interval_hours,
                 on_once_complete=_on_once_done,
             )
-            logger.info("调度器已自动恢复")
+            logger.info("调度器已按新设置重启: %s %s %sh", start_time, period_mode, interval_hours)
         except Exception as e:
-            logger.error("自动启动调度器失败: %s", e)
-
-
-def _restart_scheduler():
-    """根据最新设置重启调度器。"""
-    global _scheduler_instance
-    from src.database import get_crud
-    crud = get_crud(_config.database.path)
-
-    # 停止旧调度器
-    if _scheduler_instance:
-        try:
-            _scheduler_instance.shutdown(wait=False)
-        except Exception:
-            pass
-        _scheduler_instance = None
-
-    # 如果 auto_pull 未启用，不启动
-    if crud.get_setting("auto_pull", "false") != "true":
-        logger.info("auto_pull=false，调度器已停止")
-        return
-
-    start_time = crud.get_setting("pull_start_time", "09:00")
-    period_mode = crud.get_setting("pull_period_mode", "interval")
-    interval_hours = float(crud.get_setting("pull_interval_hours", "24"))
-
-    try:
-        _scheduler_instance = start_scheduler(
-            _config, start_time, period_mode, interval_hours,
-            on_once_complete=_on_once_done,
-        )
-        logger.info("调度器已按新设置重启: %s %s %sh", start_time, period_mode, interval_hours)
-    except Exception as e:
-        logger.error("调度器重启失败: %s", e)
+            crud.release_scheduler_lock()
+            logger.error("调度器重启失败: %s", e)
+    finally:
+        _scheduler_lock.release()
 
 
 def _on_once_done():
@@ -110,8 +152,9 @@ def _on_once_done():
     global _scheduler_instance
     crud = get_crud(_config.database.path)
     crud.set_setting("auto_pull", "false")
+    crud.release_scheduler_lock()
     _scheduler_instance = None
-    logger.info("Once 任务已完成，调度器已自动停止")
+    logger.info("Once 任务已完成，调度器已自动停止并释放锁")
 
 
 def _git_commit_push(commit_msg: str = ""):
@@ -1128,7 +1171,85 @@ async def _auto_analyze_pull(pull_id: int):
 
 @app.get("/api/scheduler/status")
 async def api_scheduler_status():
-    """调度器运行状态。"""
+    """调度器运行状态（含跨进程锁持有者信息）。"""
+    global _scheduler_instance
+    from src.database import get_crud
+    crud = get_crud(_config.database.path)
+    owner = crud.get_scheduler_owner()
+    return {
+        "running": _scheduler_instance is not None,
+        "auto_pull": crud.get_setting("auto_pull", "false") == "true",
+        "start_time": crud.get_setting("pull_start_time", "09:00"),
+        "period_mode": crud.get_setting("pull_period_mode", "interval"),
+        "interval_hours": crud.get_setting("pull_interval_hours", "24"),
+        "lock_owner": owner,  # None 表示无锁，或 {pid, started_at, mode, is_alive}
+    }
+
+
+@app.post("/api/trigger/daemon/start")
+async def trigger_daemon_start(user: dict = Depends(require_super_admin)):
+    """手动启动调度器守护进程（仅超级管理员）。"""
+    global _scheduler_instance
+    from src.database import get_crud
+    crud = get_crud(_config.database.path)
+
+    if _scheduler_instance is not None:
+        return {"status": "ok", "message": "调度器已在运行"}
+
+    start_time = crud.get_setting("pull_start_time", "09:00")
+    period_mode = crud.get_setting("pull_period_mode", "interval")
+    interval_hours = float(crud.get_setting("pull_interval_hours", "24"))
+
+    with _scheduler_lock:
+        if _scheduler_instance is not None:  # double-check
+            return {"status": "ok", "message": "调度器已在运行"}
+
+        # 获取跨进程互斥锁
+        if not crud.acquire_scheduler_lock(mode="web_server"):
+            owner = crud.get_scheduler_owner()
+            return {
+                "status": "error",
+                "message": f"已有调度器运行中: PID={owner['pid']}, mode={owner['mode']}" if owner else "无法获取调度器锁"
+            }
+
+        crud.set_setting("auto_pull", "true")
+        try:
+            _scheduler_instance = start_scheduler(
+                _config, start_time, period_mode, interval_hours,
+                on_once_complete=_on_once_done,
+            )
+            logger.info("管理员手动启动调度器: %s %s %sh", start_time, period_mode, interval_hours)
+            return {"status": "ok", "message": "调度器已启动"}
+        except Exception as e:
+            crud.release_scheduler_lock()
+            logger.error("手动启动调度器失败: %s", e)
+            return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/trigger/daemon/stop")
+async def trigger_daemon_stop(user: dict = Depends(require_super_admin)):
+    """手动停止调度器守护进程（仅超级管理员）。"""
+    global _scheduler_instance
+    from src.database import get_crud
+    crud = get_crud(_config.database.path)
+
+    with _scheduler_lock:
+        if _scheduler_instance is None:
+            return {"status": "ok", "message": "调度器未在运行"}
+        try:
+            _scheduler_instance.shutdown(wait=True)
+        except Exception:
+            pass
+        _scheduler_instance = None
+        crud.set_setting("auto_pull", "false")
+        crud.release_scheduler_lock()
+        logger.info("管理员手动停止调度器并释放锁")
+        return {"status": "ok", "message": "调度器已停止"}
+
+
+@app.get("/api/trigger/daemon/status")
+async def trigger_daemon_status():
+    """守护进程运行状态（别名，无需登录）。"""
     global _scheduler_instance
     from src.database import get_crud
     crud = get_crud(_config.database.path)
@@ -1183,6 +1304,19 @@ async def api_save_settings(data: dict, user: dict = Depends(require_super_admin
         _restart_scheduler()
 
     return {"status": "ok"}
+
+
+@app.post("/api/maintenance/dedup-pulls")
+async def api_dedup_pulls(user: dict = Depends(require_super_admin)):
+    """清理历史重复 pull（仅超级管理员）。
+
+    同一天若有多条 pull，保留最新一条，删除其余。
+    返回删除数量。
+    """
+    from src.database import get_crud
+    crud = get_crud(_config.database.path)
+    removed = crud.dedup_all_pulls()
+    return {"status": "ok", "removed": removed}
 
 
 # ═══════════════════════════════════════════════════════════

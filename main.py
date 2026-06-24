@@ -81,9 +81,25 @@ async def run_once(config: AppConfig, force: bool = False):
 def run_daemon(config: AppConfig):
     """以守护进程模式运行。"""
     logger = logging.getLogger("daemon")
+
+    # ── 数据库层面互斥：检查 auto_pull 并获取跨进程锁 ──
+    from src.database import get_crud
+    crud = get_crud(config.database.path)
+
+    if crud.get_setting("auto_pull", "false") != "true":
+        logger.info("auto_pull=false，守护进程不启动调度器")
+        return
+
+    if not crud.acquire_scheduler_lock(mode="daemon"):
+        owner = crud.get_scheduler_owner()
+        logger.error(
+            "无法获取调度器锁，已有调度器在运行: PID=%s mode=%s",
+            owner["pid"] if owner else "?", owner["mode"] if owner else "?"
+        )
+        return
+
     logger.info("=== 守护进程模式 ===")
     logger.info(f"计划任务: 每天 {config.scheduler.run_time} ({config.scheduler.timezone})")
-    logger.info(f"周总结日: 每周{'一二三四五六日'[config.scheduler.summary_day]}")
     logger.info("按 Ctrl+C 退出")
 
     scheduler, job = create_scheduler(config)
@@ -97,6 +113,8 @@ def run_daemon(config: AppConfig):
         logger.info("收到退出信号，正在关闭...")
         scheduler.shutdown(wait=False)
         logger.info("调度器已关闭")
+    finally:
+        crud.release_scheduler_lock()
 
 
 def start_scheduler(config: AppConfig, start_time: str = "09:00",

@@ -60,11 +60,18 @@ class TrendingJob:
             "pull_id": None,
             "fetched": 0,
             "highlights": 0,
+            "skipped": False,
             "errors": [],
         }
 
+        # ── 幂等性保护：当天已有 pull 且非强制模式则跳过 ──
+        if not force and self.crud.has_pull_for_date(today):
+            logger.info("今日已有 Trending 数据，跳过重复抓取（force=False）")
+            result["skipped"] = True
+            return result
+
         logger.info(f"{'='*60}")
-        logger.info(f"开始执行每日 Trending 抓取: {today}")
+        logger.info(f"开始执行每日 Trending 抓取: {today} {'(强制)' if force else ''}")
         logger.info(f"{'='*60}")
 
         # ── 步骤 1: 抓取 Trending 数据 ──

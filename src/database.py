@@ -323,6 +323,16 @@ class CRUD:
                 .first()
             )
 
+    def has_pull_for_date(self, target_date: date) -> bool:
+        """检查指定日期是否已有 trending pull 记录（幂等性保护）。"""
+        with self.db.get_session() as session:
+            return (
+                session.query(TrendingPull)
+                .filter(sa_func.date(TrendingPull.pulled_at) == target_date)
+                .first()
+                is not None
+            )
+
     def get_pull_item_repos(self, pull_id: int) -> list[dict]:
         """获取 pull 中所有项目（含 repo 信息）。"""
         with self.db.get_session() as session:
@@ -349,6 +359,46 @@ class CRUD:
             session.query(TrendingPullItem).filter_by(pull_id=pull_id).delete()
             session.query(TrendingPull).filter_by(id=pull_id).delete()
             session.commit()
+
+    def dedup_pulls_for_date(self, target_date: date) -> int:
+        """清理指定日期的重复 pull，保留最新一条，返回删除数。"""
+        with self.db.get_session() as session:
+            pulls = (
+                session.query(TrendingPull)
+                .filter(sa_func.date(TrendingPull.pulled_at) == target_date)
+                .order_by(TrendingPull.id.desc())
+                .all()
+            )
+            if len(pulls) <= 1:
+                return 0
+
+            # 保留最新的（ID 最大），删除其余
+            keep = pulls[0]
+            to_delete = pulls[1:]
+            for p in to_delete:
+                session.query(TrendingPullItem).filter_by(pull_id=p.id).delete()
+                session.query(TrendingPull).filter_by(id=p.id).delete()
+            session.commit()
+            logger.info("去重 %s: 保留 #%d, 删除 %d 条 (%s)",
+                         target_date, keep.id, len(to_delete),
+                         [p.id for p in to_delete])
+            return len(to_delete)
+
+    def dedup_all_pulls(self) -> int:
+        """清理所有日期的重复 pull，返回总删除数。"""
+        with self.db.get_session() as session:
+            # 找到有重复的日期
+            dup_dates = (
+                session.query(sa_func.date(TrendingPull.pulled_at).label("d"))
+                .group_by(sa_func.date(TrendingPull.pulled_at))
+                .having(sa_func.count(TrendingPull.id) > 1)
+                .all()
+            )
+        total = 0
+        for (d,) in dup_dates:
+            total += self.dedup_pulls_for_date(d)
+        logger.info("全局去重完成: 删除 %d 条重复 pull", total)
+        return total
 
     # ── ProjectAnalysis ─────────────────────────────────────
 
@@ -448,6 +498,94 @@ class CRUD:
                 .scalar()
             )
             return result or 0
+
+    # ── Scheduler Lock (跨进程互斥) ──────────────────────────
+
+    def acquire_scheduler_lock(self, mode: str = "web_server") -> bool:
+        """尝试获取调度器锁（跨进程互斥）。
+
+        成功返回 True，失败（已有活跃调度器）返回 False。
+        自动清理孤儿锁（PID 已不存在）。
+        """
+        import os as _os
+        import sys as _sys
+
+        current_pid = str(_os.getpid())
+
+        with self.db.get_session() as session:
+            existing_pid = self.get_setting("scheduler_pid", "")
+            existing_started = self.get_setting("scheduler_started_at", "")
+
+            # 检查是否有已存在的锁
+            if existing_pid:
+                # 同一进程，已持有锁
+                if existing_pid == current_pid:
+                    return True
+
+                # 检查锁持有者是否还存活
+                if self._pid_is_alive(int(existing_pid)):
+                    logger.warning(
+                        "调度器锁被 PID %s 持有（%s），拒绝获取",
+                        existing_pid, existing_started
+                    )
+                    return False
+                else:
+                    logger.warning(
+                        "检测到孤儿锁 PID %s（已不存在），自动清理",
+                        existing_pid
+                    )
+
+            # 获取锁
+            self.set_setting("scheduler_pid", current_pid)
+            self.set_setting("scheduler_started_at",
+                             datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))
+            self.set_setting("scheduler_mode", mode)
+            logger.info("调度器锁已获取: PID=%s mode=%s", current_pid, mode)
+            return True
+
+    def release_scheduler_lock(self):
+        """释放调度器锁。"""
+        import os as _os
+        current_pid = str(_os.getpid())
+        existing = self.get_setting("scheduler_pid", "")
+        if existing == current_pid or not existing:
+            self.set_setting("scheduler_pid", "")
+            self.set_setting("scheduler_started_at", "")
+            self.set_setting("scheduler_mode", "")
+            logger.info("调度器锁已释放: PID=%s", current_pid)
+
+    def get_scheduler_owner(self) -> dict | None:
+        """查询当前调度器锁的持有者信息。"""
+        pid = self.get_setting("scheduler_pid", "")
+        if not pid:
+            return None
+        return {
+            "pid": int(pid),
+            "started_at": self.get_setting("scheduler_started_at", ""),
+            "mode": self.get_setting("scheduler_mode", ""),
+            "is_alive": self._pid_is_alive(int(pid)),
+        }
+
+    @staticmethod
+    def _pid_is_alive(pid: int) -> bool:
+        """检查进程是否存活（跨平台）。"""
+        import os as _os
+        import sys as _sys
+        try:
+            if _sys.platform == "win32":
+                import ctypes
+                from ctypes import wintypes
+                kernel32 = ctypes.windll.kernel32
+                handle = kernel32.OpenProcess(0x0400, False, pid)  # PROCESS_QUERY_INFORMATION
+                if handle:
+                    kernel32.CloseHandle(handle)
+                    return True
+                return False
+            else:
+                _os.kill(pid, 0)
+                return True
+        except (OSError, ProcessLookupError):
+            return False
 
 
     # ── AppSetting ──────────────────────────────────────────
