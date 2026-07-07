@@ -1452,19 +1452,14 @@ async def _proxy_auth(path: str, data: dict, req: FastAPIRequest | None = None):
         if r.status_code >= 400:
             raise HTTPException(r.status_code, detail=body.get("detail", str(body)))
 
-        # 将 refresh_token 从 body 中提取并设置为 httpOnly cookie
-        rt = body.pop("refresh_token", None)
+        # 构建响应，并转发 user-service 的 Set-Cookie
         resp = JSONResponse(content=body)
-        if rt:
-            resp.set_cookie(
-                key="refresh_token",
-                value=rt,
-                httponly=True,
-                secure=False,       # 开发环境用 http，生产改为 True
-                samesite="lax",
-                max_age=7 * 24 * 3600,  # 7天
-                path="/api/auth",
-            )
+
+        # 透传 user-service 设置的 httpOnly cookie（refresh_token）
+        set_cookie = r.headers.get("set-cookie")
+        if set_cookie:
+            resp.headers["Set-Cookie"] = set_cookie
+
         return resp
 
 
