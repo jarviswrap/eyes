@@ -86,6 +86,7 @@ class GitHubFetcher:
         search_sort: str = "stars",
         search_order: str = "desc",
         search_min_forks: int = 3,
+        search_keyword: str = "",
     ):
         self.token = token
         self.per_page = per_page
@@ -94,6 +95,7 @@ class GitHubFetcher:
         self.search_sort = search_sort
         self.search_order = search_order
         self.search_min_forks = search_min_forks
+        self.search_keyword = search_keyword.strip()
 
     async def fetch_via_trending_page(self) -> list[TrendingRepo]:
         """【主方案】解析 GitHub Weekly Trending 页面获取仓库列表。
@@ -216,8 +218,12 @@ class GitHubFetcher:
 
         period_ago = date.today() - timedelta(days=self.search_period_days)
         date_str = period_ago.isoformat()
+        # 构建查询：关键词（如有）+ 时间范围 + 最小 forks
+        q_parts = [f"created:>={date_str}", f"forks:>={self.search_min_forks}"]
+        if self.search_keyword:
+            q_parts.insert(0, self.search_keyword)
         params = {
-            "q": f"created:>={date_str} forks:>={self.search_min_forks}",
+            "q": " ".join(q_parts),
             "sort": self.search_sort,
             "order": self.search_order,
             "per_page": self.per_page,

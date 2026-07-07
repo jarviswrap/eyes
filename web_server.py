@@ -1340,7 +1340,8 @@ async def api_search(data: dict):
         "order": data.get("search_order", "desc"),
         "per_page": per_page,
     }
-    logger.info("Search 请求: %s", params)
+    keyword = data.get("keyword", "").strip()
+    logger.info("Search 请求: keyword=%s params=%s", keyword, params)
     fetcher = GitHubFetcher(
         token=token,
         per_page=per_page,
@@ -1348,6 +1349,7 @@ async def api_search(data: dict):
         search_sort=params["sort"],
         search_order=params["order"],
         search_min_forks=params["forks_min"],
+        search_keyword=keyword,
     )
 
     try:

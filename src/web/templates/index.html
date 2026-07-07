@@ -193,6 +193,7 @@ tr:hover td{background:rgba(99,102,241,.03)}
   <div id="tab-searching" class="tab-content" style="display:none">
     <div class="card" style="margin-bottom:18px">
       <div class="card-body" style="display:flex;align-items:center;flex-wrap:wrap;gap:12px">
+        <input type="text" id="s_keyword" placeholder="搜索关键词（可选）" style="width:200px;padding:8px 12px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.85rem" onkeydown="if(event.key==='Enter')doSearch()">
         <span style="display:flex;align-items:center;gap:4px"><span style="font-size:.78rem;color:var(--txt3)">周期（天）</span><input type="number" id="s_period" value="7" min="1" max="365" style="width:60px;padding:8px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.85rem;text-align:center"></span>
         <span style="display:flex;align-items:center;gap:4px"><span style="font-size:.78rem;color:var(--txt3)">Fork≥</span><input type="number" id="s_forks" value="3" min="0" max="100" style="width:60px;padding:8px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.85rem;text-align:center"></span>
         <span style="display:flex;align-items:center;gap:4px"><span style="font-size:.78rem;color:var(--txt3)">最大拉取数量</span><input type="number" id="s_per_page" value="20" min="1" max="100" style="width:60px;padding:8px;border-radius:var(--rs);border:1px solid var(--border);background:var(--bg2);color:var(--txt);font-size:.85rem;text-align:center"></span>
@@ -582,6 +583,7 @@ async function doSearch(){
   const el=$('#search-results');
   el.innerHTML='<div class="loading"></div>';
   const body={
+    keyword: $('#s_keyword').value.trim()||'',
     search_period_days: parseInt($('#s_period').value)||7,
     search_min_forks: parseInt($('#s_forks').value)||3,
     per_page: parseInt($('#s_per_page').value)||20,
